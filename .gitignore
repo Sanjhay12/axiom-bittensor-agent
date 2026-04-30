@@ -6,5 +6,7 @@ __pycache__/
 memory.json
 bittensor_history.db
 get_discord_token.py
+discord_reader.py
+twitter.py
 *.log
 .DS_Store

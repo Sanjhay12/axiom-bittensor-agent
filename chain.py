@@ -8,12 +8,11 @@ import time
 import httpx
 import github as gh
 import reddit as rd
-import discord_reader as dc
 
 logger = logging.getLogger(__name__)
 
 _cache: dict = {}
-TTL = {"detail": 120, "overview": 1800, "metagraph": 60, "network": 60, "price": 60, "twitter": 900, "discord": 1800}
+TTL = {"detail": 120, "overview": 1800, "metagraph": 60, "network": 60, "price": 60, "social": 900}
 
 
 async def fetch_tao_price() -> str:
@@ -345,7 +344,7 @@ class ChainReader:
         for field, label in [
             ("name", "Name"), ("description", "Description"),
             ("url", "Website"), ("github_repo", "GitHub"),
-            ("discord", "Discord"), ("twitter", "Twitter"),
+            ("discord", "Discord"),
         ]:
             if data.get(field):
                 lines.append(f"- {label}: {data[field]}")
@@ -355,7 +354,7 @@ class ChainReader:
 
     async def subnet_reddit(self, netuid: int) -> str:
         key = f"reddit_{netuid}"
-        cached = _get(key, TTL["twitter"])
+        cached = _get(key, TTL["social"])
         if cached:
             return cached
 
@@ -369,20 +368,11 @@ class ChainReader:
 
     async def bittensor_reddit(self) -> str:
         key = "reddit_bittensor"
-        cached = _get(key, TTL["twitter"])
+        cached = _get(key, TTL["social"])
         if cached:
             return cached
 
         text = await rd.bittensor_reddit_context()
-        return _set(key, text) if text else ""
-
-    async def bittensor_discord(self) -> str:
-        key = "discord_bittensor"
-        cached = _get(key, TTL["discord"])
-        if cached:
-            return cached
-
-        text = await dc.bittensor_discord_context()
         return _set(key, text) if text else ""
 
     async def prewarm(self):
@@ -432,8 +422,6 @@ async def gather_chain_context(query: str, reader, recent_history: list = None, 
             global_fetches.append(fetch_tao_price())
         if "reddit" in fetch and netuid is None:
             global_fetches.append(reader.bittensor_reddit())
-        if "discord" in fetch:
-            global_fetches.append(reader.bittensor_discord())
         if global_fetches:
             parts.extend(await asyncio.gather(*global_fetches))
 
