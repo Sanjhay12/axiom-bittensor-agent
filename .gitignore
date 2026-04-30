@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+memory.json
+bittensor_history.db
+get_discord_token.py
+*.log
+.DS_Store
