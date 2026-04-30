@@ -419,7 +419,8 @@ def get_hotkey_info(sub, hotkey: str) -> dict:
 
 def make_subtensor():
     import bittensor as bt
-    return bt.subtensor(network="finney")
+    cls = getattr(bt, "Subtensor", None) or getattr(bt, "subtensor", None)
+    return cls(network="finney")
 
 
 def handle(sub, cmd):
