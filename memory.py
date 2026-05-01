@@ -1,9 +1,6 @@
 import json
-import os
 from anthropic import AsyncAnthropic
-
-_DATA_DIR = os.getenv("DATA_DIR", os.path.dirname(__file__))
-MEMORY_FILE = os.path.join(_DATA_DIR, "memory.json")
+import store
 
 _DEFAULT = {
     "user_facts": [],
@@ -37,21 +34,16 @@ Respond with JSON only, no explanation."""
 
 
 def load() -> dict:
-    if os.path.exists(MEMORY_FILE):
-        try:
-            with open(MEMORY_FILE) as f:
-                data = json.load(f)
-                for key in _DEFAULT:
-                    data.setdefault(key, [])
-                return data
-        except Exception:
-            pass
+    data = store.load_memory()
+    if data:
+        for key in _DEFAULT:
+            data.setdefault(key, [])
+        return data
     return {k: list(v) for k, v in _DEFAULT.items()}
 
 
 def save(mem: dict):
-    with open(MEMORY_FILE, "w") as f:
-        json.dump(mem, f, indent=2)
+    store.save_memory(mem)
 
 
 def to_prompt(mem: dict) -> str:
