@@ -19,6 +19,7 @@ from chain import ChainReader, gather_chain_context
 import memory as mem_store
 import memo as memo_gen
 import collector
+import fulfiller
 
 claude = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 reader = ChainReader()
@@ -201,7 +202,8 @@ async def _init_chain():
     try:
         await reader.prewarm()
         asyncio.create_task(collector.run_loop(reader))
-        logger.info("Collector started.")
+        asyncio.create_task(fulfiller.run_loop())
+        logger.info("Collector and fulfiller started.")
     except Exception as e:
         logger.error(f"Chain init failed: {e}")
 

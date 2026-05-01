@@ -4,10 +4,11 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from anthropic import AsyncAnthropic
 from chain import ChainReader, gather_chain_context
+import store
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,27 @@ async def query_endpoint(req: QueryIn):
     return {"response": response + DISCLAIMER, "queryId": req.queryId}
 
 
+class RelayIn(BaseModel):
+    queryId: int
+    input: str
+
+
+@app.post("/relay")
+async def relay_in(req: RelayIn):
+    store.insert_relay_query(req.queryId, req.input)
+    return {"ok": True}
+
+
+@app.get("/relay/{query_id}")
+async def relay_out(query_id: int):
+    row = store.get_relay_result(query_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Query not found")
+    if row["result_text"] is None:
+        return {"status": "pending", "queryId": query_id}
+    return {"status": "fulfilled", "queryId": query_id, "result": row["result_text"]}
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "agent": "Axiom / TaoPunk #2767"}
@@ -81,9 +103,15 @@ async def health():
 @app.get("/")
 async def root():
     return {
-        "agent": "Axiom",
-        "punk": "#2767",
-        "protocol": "ERC-8041",
-        "query_endpoint": "POST /query",
-        "body": {"query": "<string>"},
+        "name": "Axiom",
+        "description": "Bittensor research agent — live on-chain data, subnet analysis, validator intelligence.",
+        "version": "1.0.0",
+        "endpoint": "https://axiom-bittensor-agent-production.up.railway.app/query",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"}
+            },
+            "required": ["query"]
+        }
     }

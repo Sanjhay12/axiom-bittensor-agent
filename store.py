@@ -155,6 +155,16 @@ def init_db():
                 )
             """)
 
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS relay_queries (
+                    query_id     BIGINT PRIMARY KEY,
+                    input_text   TEXT NOT NULL,
+                    result_text  TEXT,
+                    received_at  INTEGER NOT NULL,
+                    fulfilled_at INTEGER
+                )
+            """)
+
 
 def _rows(conn, sql, params=()):
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -419,3 +429,39 @@ def save_memory(mem: dict):
                 INSERT INTO bot_memory (id, data) VALUES (1, %s)
                 ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data
             """, (json.dumps(mem),))
+
+
+# ── Relay (on-chain query bridge) ─────────────────────────────────────────────
+
+def insert_relay_query(query_id: int, input_text: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO relay_queries (query_id, input_text, received_at)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (query_id) DO NOTHING
+            """, (query_id, input_text, int(time.time())))
+
+
+def get_relay_input(query_id: int) -> str | None:
+    with get_conn() as conn:
+        row = _one(conn, "SELECT input_text FROM relay_queries WHERE query_id = %s", (query_id,))
+    return row["input_text"] if row else None
+
+
+def set_relay_result(query_id: int, result_text: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE relay_queries
+                SET result_text = %s, fulfilled_at = %s
+                WHERE query_id = %s
+            """, (result_text, int(time.time()), query_id))
+
+
+def get_relay_result(query_id: int) -> dict | None:
+    with get_conn() as conn:
+        return _one(conn, """
+            SELECT input_text, result_text, received_at, fulfilled_at
+            FROM relay_queries WHERE query_id = %s
+        """, (query_id,))

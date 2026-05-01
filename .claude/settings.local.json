@@ -3,7 +3,14 @@
     "allow": [
       "Bash(C:UserssanjhAppDataLocalProgramsPythonPython312python.exe -c ' *)",
       "Bash(python -c ' *)",
-      "Bash(python -c \"import asyncio, sys; sys.stdout.reconfigure\\(encoding='utf-8'\\); from dotenv import load_dotenv; load_dotenv\\(\\); import discord_reader as dc; result = asyncio.run\\(dc.bittensor_discord_context\\(\\)\\); print\\(result[:800] if result else 'EMPTY'\\)\")"
+      "Bash(python -c \"import asyncio, sys; sys.stdout.reconfigure\\(encoding='utf-8'\\); from dotenv import load_dotenv; load_dotenv\\(\\); import discord_reader as dc; result = asyncio.run\\(dc.bittensor_discord_context\\(\\)\\); print\\(result[:800] if result else 'EMPTY'\\)\")",
+      "Bash(ngrok version *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "WebFetch(domain:ketchup-2.gitbook.io)",
+      "WebSearch",
+      "WebFetch(domain:taopunks.io)"
     ]
   }
 }
