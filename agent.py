@@ -170,7 +170,7 @@ async def memo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     filename = f"SN{netuid}_{subnet_name.replace(' ', '_')}_Memo.pdf"
     await update.message.reply_document(
         document=InputFile(io.BytesIO(pdf_bytes), filename=filename),
-        caption=f"SN{netuid} — {subnet_name} | Cedar Ridge Capital",
+        caption=f"SN{netuid} — {subnet_name} ",
     )
 
 
@@ -181,7 +181,7 @@ async def watchlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
         filename = f"Watchlist_{datetime.now().strftime('%Y%m%d')}.pdf"
         await update.message.reply_document(
             document=InputFile(io.BytesIO(pdf_bytes), filename=filename),
-            caption=f"Watchlist — {len(picks)} picks, deep dive: SN{deep_netuid} ({deep_name}) | Cedar Ridge Capital",
+            caption=f"Watchlist — {len(picks)} picks, deep dive: SN{deep_netuid} ({deep_name}) ",
         )
     except Exception as e:
         logger.error(f"Watchlist generation failed: {e}", exc_info=True)
@@ -206,7 +206,20 @@ async def _init_chain():
         logger.error(f"Chain init failed: {e}")
 
 
+def _start_api():
+    import threading
+    import uvicorn
+    import api as api_module
+    port = int(os.getenv("PORT", 8000))
+    logger.info(f"Starting API server on port {port}...")
+    uvicorn.run(api_module.app, host="0.0.0.0", port=port, log_level="info")
+
+
 def main():
+    import threading
+    api_thread = threading.Thread(target=_start_api, daemon=True)
+    api_thread.start()
+
     logger.info("Building Telegram application...")
     app = Application.builder().token(os.getenv("TELEGRAM_BOT_TOKEN")).build()
     app.add_handler(CommandHandler("start", start))

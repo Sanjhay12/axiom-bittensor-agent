@@ -1,17 +1,71 @@
 """
 Background data collection job.
 Runs every INTERVAL seconds and snapshots key Bittensor metrics into SQLite.
+Full metagraph (validators + all miners) collected for every active subnet.
+GitHub activity collected every GITHUB_INTERVAL seconds (once per day).
 """
 import asyncio
 import logging
+import os
 import time
+from datetime import datetime, timedelta, timezone
 import httpx
 
 import store
 
 logger = logging.getLogger(__name__)
 
-INTERVAL = 4 * 3600  # every 4 hours
+INTERVAL        = 4 * 3600   # metagraph + chain data every 4 hours
+GITHUB_INTERVAL = 24 * 3600  # GitHub every 24 hours
+
+_last_github_run = 0
+
+
+def _github_headers() -> dict:
+    token = os.getenv("GITHUB_TOKEN")
+    headers = {"Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+async def _fetch_github_activity(repo_url: str) -> dict:
+    try:
+        parts = repo_url.rstrip("/").split("/")
+        if "github.com" not in repo_url or len(parts) < 5:
+            return {}
+        owner, repo = parts[-2], parts[-1]
+        base = f"https://api.github.com/repos/{owner}/{repo}"
+
+        since_7d  = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        since_30d = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+
+        async with httpx.AsyncClient(timeout=15, headers=_github_headers()) as client:
+            r = await client.get(base)
+            if r.status_code == 404:
+                return {}
+            if r.status_code != 200:
+                logger.warning(f"GitHub {repo_url}: status {r.status_code}")
+                return {}
+            meta = r.json()
+
+            c7  = await client.get(f"{base}/commits", params={"since": since_7d,  "per_page": 100})
+            c30 = await client.get(f"{base}/commits", params={"since": since_30d, "per_page": 100})
+            prs = await client.get(f"{base}/pulls",   params={"state": "open",    "per_page": 100})
+            iss = await client.get(f"{base}/issues",  params={"state": "open",    "per_page": 100})
+
+            return {
+                "repo_url":    repo_url,
+                "commits_7d":  len(c7.json())  if c7.status_code  == 200 else None,
+                "commits_30d": len(c30.json()) if c30.status_code == 200 else None,
+                "open_prs":    len(prs.json()) if prs.status_code == 200 else None,
+                "open_issues": len(iss.json()) if iss.status_code == 200 else None,
+                "stars":       meta.get("stargazers_count"),
+                "forks":       meta.get("forks_count"),
+            }
+    except Exception as e:
+        logger.warning(f"GitHub fetch failed for {repo_url}: {e}")
+        return {}
 
 
 async def _fetch_price() -> dict:
@@ -39,82 +93,124 @@ async def _fetch_price() -> dict:
 
 
 async def collect_once(reader):
+    global _last_github_run
     ts = int(time.time())
     logger.info(f"Collector: starting snapshot at {ts}")
 
-    # ── All subnets overview ──────────────────────────────────────────────────
+    # ── All subnets overview — gets alpha price + basic stats for every subnet ─
+    all_netuids = []
     try:
         overview = await reader._call({"action": "all_subnets"}, timeout=120)
         for s in overview.get("subnets", []):
             if "error" in s:
                 continue
-            store.insert_subnet_snapshot(ts, s["netuid"], {
-                "neuron_count":  s.get("neurons"),
-                "max_neurons":   s.get("max_neurons"),
-                "reg_cost_tao":  s.get("reg_cost_tao"),
-                "emission_value": s.get("emission_value"),
+            netuid = s["netuid"]
+            all_netuids.append(netuid)
+            store.insert_subnet_snapshot(ts, netuid, {
+                "neuron_count":    s.get("neurons"),
+                "max_neurons":     s.get("max_neurons"),
+                "reg_cost_tao":    s.get("reg_cost_tao"),
+                "emission_value":  s.get("emission_value"),
+                "alpha_price_tao": s.get("alpha_price_tao"),
+                "tempo":           s.get("tempo"),
+                "immunity_period": s.get("immunity_period"),
             })
-        logger.info(f"Collector: stored {len(overview.get('subnets', []))} subnet snapshots")
+        logger.info(f"Collector: stored overview for {len(all_netuids)} subnets")
     except Exception as e:
         logger.error(f"Collector: subnet overview failed: {e}")
 
-    # ── Watched subnets — full metagraph ─────────────────────────────────────
-    watched = _get_watched_netuids()
-    for netuid in watched:
+    # ── Full metagraph for every active subnet ────────────────────────────────
+    for netuid in all_netuids:
         try:
             meta = await reader._call({"action": "metagraph", "netuid": netuid}, timeout=120)
             if "error" in meta:
                 continue
-            validators = meta.get("top_validators", [])
-            miners = meta.get("top_miners", [])
+
+            validators     = meta.get("top_validators", [])
+            all_miners_data = meta.get("all_miners", meta.get("top_miners", []))
+
             store.insert_subnet_snapshot(ts, netuid, {
                 "total_stake_tao":    meta.get("total_stake_tao"),
                 "total_emission_tao": meta.get("total_emission_tao"),
                 "validator_count":    len(validators),
-                "miner_count":        len(miners),
+                "miner_count":        len(all_miners_data),
                 "neuron_count":       meta.get("n"),
             })
+
             if validators:
-                store.insert_validator_snapshots(ts, netuid, validators)
-            logger.info(f"Collector: stored metagraph for SN{netuid}")
+                prev_stakes = store.get_latest_validator_stakes(netuid)
+                store.insert_validator_snapshots(ts, netuid, validators, prev_stakes)
+
+            if all_miners_data:
+                store.insert_miner_snapshots(ts, netuid, all_miners_data)
+
+            # Weights
+            if validators:
+                try:
+                    w_data = await reader._call({"action": "weights", "netuid": netuid}, timeout=60)
+                    if "error" not in w_data and w_data.get("weights"):
+                        store.insert_weight_snapshots(ts, netuid, w_data["weights"])
+                except Exception as e:
+                    logger.warning(f"Collector: weights SN{netuid} failed: {e}")
+
+            # Churn
+            all_uids  = {v["uid"] for v in validators} | {m["uid"] for m in all_miners_data}
+            prev_uids = store.get_latest_uids(netuid)
+            if prev_uids is not None:
+                new_uids  = all_uids - prev_uids
+                lost_uids = prev_uids - all_uids
+                if new_uids or lost_uids:
+                    store.insert_churn_event(ts, netuid, new_uids, lost_uids, len(all_uids))
+                    logger.info(f"Collector: SN{netuid} churn +{len(new_uids)} -{len(lost_uids)}")
+
         except Exception as e:
             logger.error(f"Collector: metagraph SN{netuid} failed: {e}")
 
-    # ── Network info ─────────────────────────────────────────────────────────
+    logger.info(f"Collector: metagraph complete for {len(all_netuids)} subnets")
+
+    # ── GitHub — once per day for all subnets with a repo ────────────────────
+    if ts - _last_github_run >= GITHUB_INTERVAL:
+        logger.info("Collector: starting GitHub collection run")
+        gh_count = 0
+        for netuid in all_netuids:
+            try:
+                identity = await reader._call({"action": "subnet_identity", "netuid": netuid}, timeout=30)
+                repo_url = identity.get("github_repo") or identity.get("github") or identity.get("repository")
+                if not repo_url or "github.com" not in repo_url:
+                    continue
+                gh = await _fetch_github_activity(repo_url)
+                if gh:
+                    store.insert_github_activity(ts, netuid, gh)
+                    gh_count += 1
+                await asyncio.sleep(0.5)  # gentle rate limiting
+            except Exception as e:
+                logger.error(f"Collector: GitHub SN{netuid} failed: {e}")
+        _last_github_run = ts
+        logger.info(f"Collector: GitHub done — {gh_count} repos stored")
+
+    # ── Network info ──────────────────────────────────────────────────────────
     try:
         net = await reader._call({"action": "network_info"}, timeout=30)
         if "error" not in net:
             store.insert_network_snapshot(ts, net)
-            logger.info("Collector: stored network snapshot")
     except Exception as e:
         logger.error(f"Collector: network info failed: {e}")
 
-    # ── TAO price ────────────────────────────────────────────────────────────
+    # ── TAO price ─────────────────────────────────────────────────────────────
     try:
         price = await _fetch_price()
         if price.get("price") is not None:
             store.insert_price_snapshot(
                 ts, price["price"], price.get("change", 0), price.get("mcap", 0)
             )
-            logger.info(f"Collector: stored price ${price['price']:.2f}")
+            logger.info(f"Collector: TAO ${price['price']:.2f}")
     except Exception as e:
         logger.error(f"Collector: price fetch failed: {e}")
 
     logger.info("Collector: snapshot complete")
 
 
-def _get_watched_netuids() -> list:
-    """Load watched subnets from memory.json."""
-    try:
-        import memory as mem
-        data = mem.load()
-        return data.get("watched_subnets", [])
-    except Exception:
-        return []
-
-
 async def run_loop(reader):
-    """Run collection on startup then every INTERVAL seconds."""
     store.init_db()
     while True:
         try:

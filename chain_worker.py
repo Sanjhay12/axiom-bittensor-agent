@@ -143,10 +143,10 @@ def _metagraph_from_full(sub, netuid: int) -> dict:
         [x for x in neurons if x["validator_permit"]],
         key=lambda x: (x["stake"], x["dividends"]), reverse=True
     )[:10]
-    top_miners = sorted(
-        [x for x in neurons if not x["validator_permit"]],
-        key=lambda x: (x["incentive"], x["consensus"], x["emission_tao"]), reverse=True
-    )[:10]
+    miners = [x for x in neurons if not x["validator_permit"]]
+    top_miners = sorted(miners, key=lambda x: (x["incentive"], x["consensus"], x["emission_tao"]), reverse=True)[:10]
+    all_miners = [{"uid": x["uid"], "hotkey": x["hotkey"], "incentive": x["incentive"],
+                   "consensus": x["consensus"], "emission_tao": x["emission_tao"]} for x in miners]
 
     return {
         "netuid": netuid,
@@ -155,6 +155,7 @@ def _metagraph_from_full(sub, netuid: int) -> dict:
         "total_emission_tao": round(sum(x["emission_tao"] for x in neurons), 6),
         "top_validators": top_validators,
         "top_miners": top_miners,
+        "all_miners": all_miners,
     }
 
 
@@ -228,10 +229,10 @@ def _metagraph_from_neurons_lite(sub, netuid: int) -> dict:
         [x for x in neurons if x["validator_permit"]],
         key=lambda x: (x["stake"], x["dividends"]), reverse=True
     )[:10]
-    top_miners = sorted(
-        [x for x in neurons if not x["validator_permit"]],
-        key=lambda x: (x["incentive"], x["consensus"], x["emission_tao"]), reverse=True
-    )[:10]
+    miners = [x for x in neurons if not x["validator_permit"]]
+    top_miners = sorted(miners, key=lambda x: (x["incentive"], x["consensus"], x["emission_tao"]), reverse=True)[:10]
+    all_miners = [{"uid": x["uid"], "hotkey": x["hotkey"], "incentive": x["incentive"],
+                   "consensus": x["consensus"], "emission_tao": x["emission_tao"]} for x in miners]
 
     return {
         "netuid": netuid,
@@ -240,6 +241,7 @@ def _metagraph_from_neurons_lite(sub, netuid: int) -> dict:
         "total_emission_tao": round(sum(x["emission_tao"] for x in neurons), 6),
         "top_validators": top_validators,
         "top_miners": top_miners,
+        "all_miners": all_miners,
     }
 
 
@@ -308,10 +310,10 @@ def _metagraph_from_storage(sub, netuid: int) -> dict:
         [x for x in neurons if x["validator_permit"]],
         key=lambda x: (x["stake"], x["dividends"]), reverse=True
     )[:10]
-    top_miners = sorted(
-        [x for x in neurons if not x["validator_permit"]],
-        key=lambda x: (x["incentive"], x["consensus"], x["emission_tao"]), reverse=True
-    )[:10]
+    miners = [x for x in neurons if not x["validator_permit"]]
+    top_miners = sorted(miners, key=lambda x: (x["incentive"], x["consensus"], x["emission_tao"]), reverse=True)[:10]
+    all_miners = [{"uid": x["uid"], "hotkey": x["hotkey"], "incentive": x["incentive"],
+                   "consensus": x["consensus"], "emission_tao": x["emission_tao"]} for x in miners]
 
     return {
         "netuid": netuid,
@@ -320,6 +322,7 @@ def _metagraph_from_storage(sub, netuid: int) -> dict:
         "total_emission_tao": round(sum(x["emission_tao"] for x in neurons), 6),
         "top_validators": top_validators,
         "top_miners": top_miners,
+        "all_miners": all_miners,
         "partial": True,
     }
 
@@ -337,6 +340,42 @@ def get_metagraph_summary(sub, netuid: int) -> dict:
         return _metagraph_from_storage(sub, netuid)
     except Exception as e:
         return {"error": f"metagraph failed: {e}"}
+
+
+def _get_alpha_price(s, sub) -> float | None:
+    """Try to extract alpha token price (in TAO) from a SubnetInfo object."""
+    try:
+        # dTAO: price = tao_in_pool / alpha_outstanding
+        for tao_attr in ("tao_in", "alpha_in", "subnet_tao"):
+            alpha_in = getattr(s, tao_attr, None)
+            if alpha_in is not None:
+                break
+        for alpha_attr in ("alpha_out", "outstanding_alpha", "alpha_outstanding"):
+            alpha_out = getattr(s, alpha_attr, None)
+            if alpha_out is not None:
+                break
+        if alpha_in is not None and alpha_out is not None:
+            ai = float(alpha_in.tao) if hasattr(alpha_in, "tao") else float(alpha_in)
+            ao = float(alpha_out.tao) if hasattr(alpha_out, "tao") else float(alpha_out)
+            if ao > 0:
+                return round(ai / ao, 8)
+    except Exception:
+        pass
+    # Fallback: query storage directly
+    try:
+        netuid = getattr(s, "netuid", None)
+        if netuid is None:
+            return None
+        ai_raw = sub.substrate.query("SubtensorModule", "SubnetAlphaIn", [netuid])
+        ao_raw = sub.substrate.query("SubtensorModule", "SubnetAlphaOut", [netuid])
+        if ai_raw and ao_raw:
+            ai = float(ai_raw.value) / 1e9
+            ao = float(ao_raw.value) / 1e9
+            if ao > 0:
+                return round(ai / ao, 8)
+    except Exception:
+        pass
+    return None
 
 
 def get_all_subnets(sub) -> dict:
@@ -357,11 +396,27 @@ def get_all_subnets(sub) -> dict:
                 "reg_cost_tao": float(burn.tao) if burn and hasattr(burn, "tao") else None,
                 "emission_value": float(ev) if ev is not None else None,
                 "tempo": getattr(s, "tempo", None),
+                "immunity_period": getattr(s, "immunity_period", None),
+                "alpha_price_tao": _get_alpha_price(s, sub),
             })
         except Exception:
             results.append({"netuid": getattr(s, "netuid", "?"), "error": "parse failed"})
 
     return {"subnets": results}
+
+
+def get_weights(sub, netuid: int) -> dict:
+    U16_MAX = 65535.0
+    weights_map = {}
+    try:
+        for uid_key, weights_val in sub.substrate.query_map("SubtensorModule", "Weights", [netuid]):
+            uid = int(str(uid_key))
+            raw = weights_val.value if hasattr(weights_val, "value") else weights_val
+            if raw:
+                weights_map[uid] = [[int(w[0]), round(int(w[1]) / U16_MAX, 6)] for w in raw]
+    except Exception as e:
+        return {"error": str(e)}
+    return {"netuid": netuid, "weights": weights_map}
 
 
 def get_subnet_identity(sub, netuid: int) -> dict:
@@ -435,6 +490,8 @@ def handle(sub, cmd):
         return get_all_subnets(sub)
     elif action == "subnet_identity":
         return get_subnet_identity(sub, cmd["netuid"])
+    elif action == "weights":
+        return get_weights(sub, cmd["netuid"])
     elif action == "network_info":
         return get_network_info(sub)
     elif action == "hotkey_info":
@@ -444,6 +501,8 @@ def handle(sub, cmd):
 
 
 def main():
+    import io
+    sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
     sub = make_subtensor()
     print(json.dumps({"status": "ready"}), flush=True)
 

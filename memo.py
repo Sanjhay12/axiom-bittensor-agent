@@ -9,35 +9,50 @@ _cache: dict = {}
 MEMO_TTL = 3 * 3600  # 3 hours
 
 MEMO_PROMPT = """\
-You are writing a professional Bittensor subnet research memo. Using only the live on-chain data and GitHub information provided below, write a structured memo covering each section. Be direct and analytical. Have opinions. Flag anything that looks off.
+You are writing a Bittensor subnet research memo. This is not a data dump — it is a research piece that tells a story. Each section should build on the previous one. The memo should paint a complete picture: what the subnet is trying to do, whether it is doing it, whether it is worth engaging with, and exactly how — depending on who you are.
 
-This is for Telegram so use NO markdown, NO headers with #, NO bold with **, NO asterisks. Use plain text with section labels followed by a colon, and line breaks between sections.
-
-Sections to cover:
+Use NO markdown, NO bold with **, NO asterisks, NO # headers. Write each section label in ALL CAPS on its own line, then write the content below it. Never put the section label and content on the same line.
 
 OVERVIEW
-What this subnet does, its purpose, the problem it solves. Pull from the GitHub README and on-chain identity. One paragraph.
+One tight paragraph. What problem does this subnet solve in the real world? What is the actual incentive mechanism — what are miners being paid to do, and how is their work verified on-chain? How does this compare to what centralised players (AWS, OpenAI, Google, etc.) or competing subnets are doing in the same space? This sets the thesis. Everything else in the memo either supports or undermines it.
 
 NETWORK HEALTH
-Neuron count vs max, registration cost, tempo, immunity period. Is the subnet growing, full, or stagnant?
+Output only key-value pairs, one per line, in exactly this format: Label: Value
+Include: Neurons, Registration Cost, Tempo, Immunity Period, Active Validators, Active Miners
+Example line: Neurons: 201 / 256
+
+COMPETITIVE LANDSCAPE
+How does this subnet compare to the most similar subnets on Bittensor? How does it compare to centralised or off-chain alternatives doing the same thing? Where is it winning, where is it losing, and what is its actual moat if any? Be specific — name competitors.
 
 VALIDATOR LANDSCAPE
-Number of validators, stake concentration (who dominates), vtrust distribution. Is consensus healthy? Any red flags?
+Do not list validators. Interpret what the stake distribution means. Is the network healthy or dangerously centralised? What does the vtrust distribution say about consensus quality? Are there signs of gaming or collusion? End with a clear one-sentence view on whether this is a good place to stake right now.
+Validator Score: x/10
 
 MINER LANDSCAPE
-Top miners by incentive score, how competitive is it, is there meaningful differentiation or are scores clustered? Remember miner TAO emission is zero by design in dTAO — focus on incentive and consensus scores.
+What does it actually take to compete here? What hardware is required, what is the setup difficulty, what is the realistic expected revenue range for a new miner entering today? Are incentive scores differentiated or clustered (and what does that mean)? Remember: miner TAO emission is zero by design in dTAO — focus on incentive, alpha earnings, and competitiveness. End with a clear one-sentence view on mining viability.
+Miner Score: x/10
 
 EMISSION & ECONOMICS
-Total subnet emission, how it flows to validators as dividends. TAO price context if available. Worth validating here right now?
+Follow the money. What is total emission, how does it flow, what does a validator realistically earn per day at current rates? Is the emission level justified by the subnet's traction and quality? What is the risk/reward for capital deployed here? If TAO price is available, translate emissions into USD context.
+Economics Score: x/10
 
 DEVELOPMENT ACTIVITY
-Recent GitHub commits, open PRs, latest release. Is development active or stale?
+Do not list commits. Tell the story of what this team has actually built and where they are heading. What does the nature of recent work say about team maturity — are they building real infrastructure, shipping features, or doing optics maintenance? What does GitHub momentum (stars, forks, open issues, PR velocity) say about community traction? What has been shipped recently that matters?
+Development Score: x/10
 
 RISK FACTORS
-Anything suspicious or worth flagging — extreme stake concentration, low neuron count, stale development, high reg cost vs emission, anything else that stands out.
+What are the key risks to this subnet's execution — not data flags, but things that could actually break the thesis? Consider: stake centralisation risk, competitive displacement, technical delivery risk, incentive mechanism fragility, team/operational risk. Be direct.
+Risk Score: x/10
 
 VERDICT
-One honest paragraph. Your actual take on this subnet right now.
+One honest paragraph. Is this subnet investable, worth mining, worth validating, or worth avoiding right now? Give a clear call to action. Do not hedge.
+Overall Score: x/10
+
+RECOMMENDATIONS
+Write exactly three lines, each starting with the role label:
+Miners: one sentence — should they mine here, why or why not, any hardware or timing notes.
+Validators: one sentence — should they stake here, why or why not.
+Investors/Holders: one sentence — is there a capital allocation case, what is the thesis.
 
 ---
 Live Data:
@@ -65,7 +80,7 @@ async def generate(netuid: int, reader: ChainReader, claude) -> str:
 
     result = await claude.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=2000,
+        max_tokens=3000,
         messages=[{"role": "user", "content": MEMO_PROMPT.format(context=context)}],
     )
 
@@ -167,12 +182,18 @@ async def generate_pdf(netuid: int, reader: ChainReader, claude) -> tuple[str, b
     """Returns (subnet_name, pdf_bytes)."""
     memo_text = await generate(netuid, reader, claude)
 
-    # Extract subnet name from identity or first line of memo
     identity = await reader.subnet_identity_summary(netuid)
     name_match = re.search(r"Name:\s*(.+)", identity or "")
     subnet_name = name_match.group(1).strip() if name_match else f"Subnet {netuid}"
 
-    pdf_bytes = pdf_gen.generate_pdf(netuid, subnet_name, memo_text)
+    # Short tagline from identity description
+    desc_match = re.search(r"Description:\s*(.+)", identity or "")
+    tagline = None
+    if desc_match:
+        desc = desc_match.group(1).strip()
+        tagline = desc if len(desc) <= 80 else desc[:77] + "..."
+
+    pdf_bytes = pdf_gen.generate_pdf(netuid, subnet_name, memo_text, tagline=tagline)
     return subnet_name, pdf_bytes
 
 
