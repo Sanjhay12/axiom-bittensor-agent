@@ -99,6 +99,7 @@ async def collect_once(reader):
 
     # ── All subnets overview — gets alpha price + basic stats for every subnet ─
     all_netuids = []
+    subnet_data = {}  # accumulate all fields before inserting
     try:
         overview = await reader._call({"action": "all_subnets"}, timeout=120)
         for s in overview.get("subnets", []):
@@ -106,16 +107,15 @@ async def collect_once(reader):
                 continue
             netuid = s["netuid"]
             all_netuids.append(netuid)
-            store.insert_subnet_snapshot(ts, netuid, {
+            subnet_data[netuid] = {
                 "neuron_count":    s.get("neurons"),
                 "max_neurons":     s.get("max_neurons"),
                 "reg_cost_tao":    s.get("reg_cost_tao"),
-                "emission_value":  s.get("emission_value"),
                 "alpha_price_tao": s.get("alpha_price_tao"),
                 "tempo":           s.get("tempo"),
                 "immunity_period": s.get("immunity_period"),
-            })
-        logger.info(f"Collector: stored overview for {len(all_netuids)} subnets")
+            }
+        logger.info(f"Collector: fetched overview for {len(all_netuids)} subnets")
     except Exception as e:
         logger.error(f"Collector: subnet overview failed: {e}")
 
@@ -126,16 +126,20 @@ async def collect_once(reader):
             if "error" in meta:
                 continue
 
-            validators     = meta.get("top_validators", [])
+            validators      = meta.get("top_validators", [])
             all_miners_data = meta.get("all_miners", meta.get("top_miners", []))
 
-            store.insert_subnet_snapshot(ts, netuid, {
+            # Merge metagraph fields into the existing overview data
+            subnet_data.setdefault(netuid, {}).update({
                 "total_stake_tao":    meta.get("total_stake_tao"),
                 "total_emission_tao": meta.get("total_emission_tao"),
                 "validator_count":    len(validators),
                 "miner_count":        len(all_miners_data),
-                "neuron_count":       meta.get("n"),
+                "neuron_count":       meta.get("n") or subnet_data.get(netuid, {}).get("neuron_count"),
             })
+
+            # Insert the fully merged snapshot once
+            store.insert_subnet_snapshot(ts, netuid, subnet_data[netuid])
 
             if validators:
                 prev_stakes = store.get_latest_validator_stakes(netuid)
@@ -165,6 +169,9 @@ async def collect_once(reader):
 
         except Exception as e:
             logger.error(f"Collector: metagraph SN{netuid} failed: {e}")
+            # Still insert whatever overview data we have for this subnet
+            if netuid in subnet_data and "total_stake_tao" not in subnet_data[netuid]:
+                store.insert_subnet_snapshot(ts, netuid, subnet_data[netuid])
 
     logger.info(f"Collector: metagraph complete for {len(all_netuids)} subnets")
 

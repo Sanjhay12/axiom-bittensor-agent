@@ -1,8 +1,17 @@
+import os
 import re
 import httpx
 
 TIMEOUT = 10
 MAX_README_CHARS = 3000  # trim long READMEs before injecting into context
+
+
+def _gh_headers() -> dict:
+    token = os.getenv("GITHUB_TOKEN")
+    headers = {"Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 _GITHUB_RE = re.compile(r'github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)', re.IGNORECASE)
 
@@ -51,7 +60,7 @@ async def fetch_repo_meta(github_url: str) -> dict:
         try:
             r = await client.get(
                 f"https://api.github.com/repos/{repo}",
-                headers={"Accept": "application/vnd.github+json"},
+                headers=_gh_headers(),
             )
             if r.status_code == 200:
                 data = r.json()
@@ -78,7 +87,7 @@ async def fetch_commits(github_url: str, limit: int = 5) -> list[dict]:
             r = await client.get(
                 f"https://api.github.com/repos/{repo}/commits",
                 params={"per_page": limit},
-                headers={"Accept": "application/vnd.github+json"},
+                headers=_gh_headers(),
             )
             if r.status_code == 200:
                 return [
@@ -106,7 +115,7 @@ async def fetch_pull_requests(github_url: str, limit: int = 5) -> list[dict]:
             r = await client.get(
                 f"https://api.github.com/repos/{repo}/pulls",
                 params={"state": "open", "per_page": limit, "sort": "updated"},
-                headers={"Accept": "application/vnd.github+json"},
+                headers=_gh_headers(),
             )
             if r.status_code == 200:
                 return [
@@ -135,7 +144,7 @@ async def fetch_releases(github_url: str, limit: int = 3) -> list[dict]:
             r = await client.get(
                 f"https://api.github.com/repos/{repo}/releases",
                 params={"per_page": limit},
-                headers={"Accept": "application/vnd.github+json"},
+                headers=_gh_headers(),
             )
             if r.status_code == 200:
                 return [

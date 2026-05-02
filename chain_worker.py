@@ -388,13 +388,11 @@ def get_all_subnets(sub) -> dict:
     for s in subnets:
         try:
             burn = getattr(s, "burn", None)
-            ev = getattr(s, "emission_value", None)
             results.append({
                 "netuid": s.netuid,
                 "neurons": getattr(s, "subnetwork_n", None),
                 "max_neurons": getattr(s, "max_n", None),
                 "reg_cost_tao": float(burn.tao) if burn and hasattr(burn, "tao") else None,
-                "emission_value": float(ev) if ev is not None else None,
                 "tempo": getattr(s, "tempo", None),
                 "immunity_period": getattr(s, "immunity_period", None),
                 "alpha_price_tao": _get_alpha_price(s, sub),
@@ -442,18 +440,19 @@ def get_network_info(sub) -> dict:
     result = {}
     try:
         result["block"] = sub.get_current_block()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"network_info: get_current_block failed: {e}")
     try:
         ti = sub.total_issuance()
         result["total_issuance_tao"] = float(ti.tao) if hasattr(ti, "tao") else float(ti)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"network_info: total_issuance failed: {e}")
     try:
         ts = sub.total_stake()
         result["total_stake_tao"] = float(ts.tao) if hasattr(ts, "tao") else float(ts)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"network_info: total_stake failed: {e}")
+    logger.info(f"network_info result: {result}")
     return result
 
 

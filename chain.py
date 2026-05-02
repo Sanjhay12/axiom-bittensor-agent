@@ -141,9 +141,9 @@ class ChainReader:
             lines.append(f"- Tempo: {data['tempo']} blocks")
         if data.get("immunity_period") is not None:
             lines.append(f"- Immunity Period: {data['immunity_period']} blocks")
-        ev = data.get("emission_value")
+        ev = data.get("total_emission_tao")
         if ev is not None and ev != 0:
-            lines.append(f"- Emission: {ev:.6f}")
+            lines.append(f"- Total Emission: {ev:.4f} TAO")
         for field, label in [
             ("kappa", "Kappa"),
             ("rho", "Rho"),
@@ -259,8 +259,8 @@ class ChainReader:
                 continue
             neurons = f"{s.get('neurons')}/{s.get('max_neurons')}" if s.get("neurons") is not None else "N/A"
             cost = f"{s['reg_cost_tao']:.4f} TAO" if s.get("reg_cost_tao") is not None else "N/A"
-            ev = s.get("emission_value")
-            emission = f"{ev:.6f}" if ev else "N/A"
+            ev = s.get("total_emission_tao")
+            emission = f"{ev:.4f} TAO" if ev else "N/A"
             lines.append(f"- SN{s['netuid']}: neurons={neurons}, reg_cost={cost}, emission={emission}")
 
         text = "\n".join(lines)
