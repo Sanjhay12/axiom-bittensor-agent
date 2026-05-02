@@ -111,8 +111,8 @@ async def health():
 
 
 RPC_URL          = os.getenv("RPC_URL", "https://lite.chain.opentensor.ai")
-FULL_FEE_WEI     = 100_000_000_000_000  # 0.0001 TAO
-HALF_FEE_WEI     = 50_000_000_000_000   # 0.00005 TAO
+FULL_FEE_WEI     = 0  # testing: free
+HALF_FEE_WEI     = 0  # testing: free
 SUB_DURATION_SEC = 30 * 24 * 3600       # 30 days
 
 

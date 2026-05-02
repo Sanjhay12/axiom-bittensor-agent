@@ -246,7 +246,7 @@
     <!-- Ask Once panel -->
     <div class="tab-panel active" id="panel-query">
       <textarea id="questionInput" placeholder="Ask anything about Bittensor — subnets, validators, emissions, staking…" disabled></textarea>
-      <p class="fee-note">One-time fee: 0.0001 TAO &nbsp;·&nbsp; Paid on-chain to TaoPunk #2767</p>
+      <p class="fee-note">Free during beta &nbsp;·&nbsp; Paid on-chain to TaoPunk #2767</p>
       <div class="submit-row">
         <button id="submitBtn" onclick="submitQuery()" disabled>Ask Axiom</button>
       </div>
@@ -260,7 +260,7 @@
     <!-- Subscribe panel -->
     <div class="tab-panel" id="panel-subscribe">
       <div class="sub-info">
-        <h3>Monthly Access — 0.0001 TAO / month</h3>
+        <h3>Monthly Access — Free during beta</h3>
         <ul>
           <li>Unlimited questions via Telegram</li>
           <li>Subnet research memos (PDF)</li>
@@ -268,7 +268,7 @@
           <li>Live on-chain data, Reddit sentiment</li>
         </ul>
       </div>
-      <p class="fee-note">Pay 0.0001 TAO directly to the agent wallet &nbsp;·&nbsp; 30-day access</p>
+      <p class="fee-note">Free during beta &nbsp;·&nbsp; 30-day access</p>
       <div class="submit-row">
         <button id="subBtn" onclick="subscribe()" disabled>Pay &amp; Get Telegram Access</button>
       </div>
@@ -284,8 +284,8 @@
     const CHAIN_HEX  = "0x" + CHAIN_ID.toString(16);
     const RPC_URL    = "https://lite.chain.opentensor.ai";
     const API_BASE    = "https://axiom-bittensor-agent-production.up.railway.app";
-    const FEE_WEI     = "0x" + (100000000000000n).toString(16);
-    const HALF_FEE    = "0x" + (50000000000000n).toString(16);  // 0.00005 TAO each
+    const FEE_WEI     = "0x0";  // testing: free
+    const HALF_FEE    = "0x0";  // testing: free
 
     const QUERY_SIG   = "0x045cf2f6"; // keccak256("query(uint256,bytes32)")[0:4]
 
