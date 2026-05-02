@@ -84,6 +84,31 @@ async def query_endpoint(req: QueryIn):
     return {"response": response + DISCLAIMER, "queryId": req.queryId}
 
 
+class DevQueryIn(BaseModel):
+    query: str
+    password: str
+
+
+@app.post("/dev/query")
+async def dev_query(req: DevQueryIn):
+    dev_password = os.getenv("DEV_PASSWORD", "")
+    if not dev_password or req.password != dev_password:
+        raise HTTPException(status_code=401, detail="Invalid dev password")
+    SYSTEM_PROMPT, DISCLAIMER, _ = _get_constants()
+    plan = await _get_fetch_plan(req.query)
+    chain_context = await gather_chain_context(req.query, _reader, recent_history=[], plan=plan)
+    system = SYSTEM_PROMPT
+    if chain_context:
+        system += f"\n\n---\n## Live On-Chain Data\n{chain_context}\n---"
+    result = await _claude.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1000,
+        system=system,
+        messages=[{"role": "user", "content": req.query}],
+    )
+    return {"response": result.content[0].text + DISCLAIMER}
+
+
 class RelayIn(BaseModel):
     queryId: int
     input: str
