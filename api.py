@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from anthropic import AsyncAnthropic
 from chain import ChainReader, gather_chain_context
@@ -234,6 +235,11 @@ async def subscribe_status(wallet: str):
     if not sub or sub["expires_at"] <= int(time.time()):
         return {"active": False}
     return {"active": True, "expires_at": sub["expires_at"]}
+
+
+@app.get("/query.html")
+async def query_page():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "query.html"), media_type="text/html")
 
 
 @app.get("/")
