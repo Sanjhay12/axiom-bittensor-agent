@@ -124,6 +124,10 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         return
 
+    if not _is_subscribed(update.effective_user.id):
+        await message.reply_text(_subscription_required_msg())
+        return
+
     await message.reply_chat_action("typing")
 
     chat_id = message.chat_id
@@ -155,6 +159,10 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def memo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_subscribed(update.effective_user.id):
+        await update.message.reply_text(_subscription_required_msg())
+        return
+
     args = context.args
     if not args:
         await update.message.reply_text("Usage: /memo SN5 or /memo 5")
@@ -176,6 +184,10 @@ async def memo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def watchlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_subscribed(update.effective_user.id):
+        await update.message.reply_text(_subscription_required_msg())
+        return
+
     await update.message.reply_chat_action("typing")
     try:
         picks, deep_netuid, deep_name, pdf_bytes = await memo_gen.generate_watchlist(reader, claude)
@@ -189,8 +201,35 @@ async def watchlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Watchlist generation failed — check terminal for details.")
 
 
+def _subscription_required_msg() -> str:
+    return (
+        "You need an active subscription to use Axiom.\n\n"
+        "Get access at: https://axiom-bittensor-agent-production.up.railway.app/query.html"
+    )
+
+
+def _is_subscribed(telegram_id: int) -> bool:
+    import store
+    return store.get_telegram_subscription(telegram_id) is not None
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Agent online. Ask me anything.")
+    import store
+    args = context.args
+    if args:
+        code = args[0]
+        wallet = store.claim_access_code(code, update.effective_user.id)
+        if wallet:
+            await update.message.reply_text(
+                "You're in. Axiom is online — ask me anything about Bittensor."
+            )
+        else:
+            await update.message.reply_text("That invite link is invalid or already used.")
+    else:
+        if _is_subscribed(update.effective_user.id):
+            await update.message.reply_text("Axiom online. Ask me anything.")
+        else:
+            await update.message.reply_text(_subscription_required_msg())
 
 
 async def prewarm(app):

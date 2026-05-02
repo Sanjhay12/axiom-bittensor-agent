@@ -1,5 +1,6 @@
 import json
 import os
+import secrets
 import time
 from contextlib import contextmanager
 
@@ -162,6 +163,25 @@ def init_db():
                     result_text  TEXT,
                     received_at  INTEGER NOT NULL,
                     fulfilled_at INTEGER
+                )
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    wallet      TEXT PRIMARY KEY,
+                    tx_hash     TEXT NOT NULL,
+                    created_at  INTEGER NOT NULL,
+                    expires_at  INTEGER NOT NULL
+                )
+            """)
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS access_codes (
+                    code        TEXT PRIMARY KEY,
+                    wallet      TEXT NOT NULL,
+                    telegram_id BIGINT,
+                    created_at  INTEGER NOT NULL,
+                    used_at     INTEGER
                 )
             """)
 
@@ -465,3 +485,60 @@ def get_relay_result(query_id: int) -> dict | None:
             SELECT input_text, result_text, received_at, fulfilled_at
             FROM relay_queries WHERE query_id = %s
         """, (query_id,))
+
+
+# ── Subscriptions ─────────────────────────────────────────────────────────────
+
+def upsert_subscription(wallet: str, tx_hash: str, expires_at: int):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO subscriptions (wallet, tx_hash, created_at, expires_at)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (wallet) DO UPDATE
+                    SET tx_hash = EXCLUDED.tx_hash,
+                        created_at = EXCLUDED.created_at,
+                        expires_at = EXCLUDED.expires_at
+            """, (wallet.lower(), tx_hash, int(time.time()), expires_at))
+
+
+def get_subscription(wallet: str) -> dict | None:
+    with get_conn() as conn:
+        return _one(conn, "SELECT * FROM subscriptions WHERE wallet = %s", (wallet.lower(),))
+
+
+def is_subscribed(wallet: str) -> bool:
+    sub = get_subscription(wallet)
+    return sub is not None and sub["expires_at"] > int(time.time())
+
+
+def create_access_code(wallet: str) -> str:
+    code = secrets.token_urlsafe(16)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO access_codes (code, wallet, created_at)
+                VALUES (%s, %s, %s)
+            """, (code, wallet.lower(), int(time.time())))
+    return code
+
+
+def claim_access_code(code: str, telegram_id: int) -> str | None:
+    with get_conn() as conn:
+        row = _one(conn, "SELECT * FROM access_codes WHERE code = %s", (code,))
+        if not row or row["used_at"] is not None:
+            return None
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE access_codes SET telegram_id = %s, used_at = %s WHERE code = %s
+            """, (telegram_id, int(time.time()), code))
+        return row["wallet"]
+
+
+def get_telegram_subscription(telegram_id: int) -> dict | None:
+    with get_conn() as conn:
+        return _one(conn, """
+            SELECT s.* FROM subscriptions s
+            JOIN access_codes a ON a.wallet = s.wallet
+            WHERE a.telegram_id = %s AND s.expires_at > %s
+        """, (telegram_id, int(time.time())))

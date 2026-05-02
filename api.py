@@ -2,8 +2,10 @@ import asyncio
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -106,6 +108,89 @@ async def relay_out(query_id: int):
 @app.get("/health")
 async def health():
     return {"status": "ok", "agent": "Axiom / TaoPunk #2767"}
+
+
+RPC_URL          = os.getenv("RPC_URL", "https://lite.chain.opentensor.ai")
+FULL_FEE_WEI     = 100_000_000_000_000  # 0.0001 TAO
+HALF_FEE_WEI     = 50_000_000_000_000   # 0.00005 TAO
+SUB_DURATION_SEC = 30 * 24 * 3600       # 30 days
+
+
+async def _verify_sub_tx(client: httpx.AsyncClient, tx_hash: str, from_wallet: str, to_wallet: str, min_wei: int = HALF_FEE_WEI) -> bool:
+    receipt_r = await client.post(RPC_URL, json={
+        "jsonrpc": "2.0", "method": "eth_getTransactionReceipt",
+        "params": [tx_hash], "id": 1,
+    })
+    receipt = receipt_r.json().get("result")
+    if not receipt or receipt.get("status") != "0x1":
+        return False
+
+    tx_r = await client.post(RPC_URL, json={
+        "jsonrpc": "2.0", "method": "eth_getTransactionByHash",
+        "params": [tx_hash], "id": 1,
+    })
+    tx = tx_r.json().get("result")
+    if not tx:
+        return False
+
+    if tx.get("from", "").lower() != from_wallet.lower():
+        return False
+    if tx.get("to", "").lower() != to_wallet.lower():
+        return False
+    if int(tx.get("value", "0x0"), 16) < min_wei:
+        return False
+    return True
+
+
+@app.get("/config")
+async def config():
+    return {
+        "owner_wallet":   os.getenv("OWNER_WALLET", ""),
+        "partner_wallet": os.getenv("PARTNER_WALLET", ""),
+        "bot_username":   os.getenv("BOT_USERNAME", ""),
+    }
+
+
+class SubscribeIn(BaseModel):
+    wallet:    str
+    tx_hash_1: str
+    tx_hash_2: str | None = None  # only required when PARTNER_WALLET is set
+
+
+@app.post("/subscribe")
+async def subscribe(req: SubscribeIn):
+    owner   = os.getenv("OWNER_WALLET", "").lower()
+    partner = os.getenv("PARTNER_WALLET", "").lower()
+    if not owner:
+        raise HTTPException(status_code=500, detail="OWNER_WALLET not configured")
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        if partner:
+            ok1, ok2 = await asyncio.gather(
+                _verify_sub_tx(client, req.tx_hash_1, req.wallet, owner),
+                _verify_sub_tx(client, req.tx_hash_2, req.wallet, partner),
+            )
+            if not ok1 or not ok2:
+                raise HTTPException(status_code=400, detail="One or both transactions are invalid or insufficient")
+        else:
+            ok1 = await _verify_sub_tx(client, req.tx_hash_1, req.wallet, owner, min_wei=FULL_FEE_WEI)
+            if not ok1:
+                raise HTTPException(status_code=400, detail="Transaction not valid or insufficient payment")
+
+    expires_at = int(time.time()) + SUB_DURATION_SEC
+    store.upsert_subscription(req.wallet, req.tx_hash_1, expires_at)
+    code = store.create_access_code(req.wallet)
+    bot_username = os.getenv("BOT_USERNAME", "")
+    telegram_link = f"https://t.me/{bot_username}?start={code}" if bot_username else None
+    return {"ok": True, "expires_at": expires_at, "telegram_link": telegram_link}
+
+
+@app.get("/subscribe/status/{wallet}")
+async def subscribe_status(wallet: str):
+    sub = store.get_subscription(wallet)
+    if not sub or sub["expires_at"] <= int(time.time()):
+        return {"active": False}
+    return {"active": True, "expires_at": sub["expires_at"]}
 
 
 @app.get("/")

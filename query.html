@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Axiom — Bittensor Research Agent</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a0a;
+      color: #e0e0e0;
+      font-family: 'Courier New', monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 16px;
+    }
+
+    h1 {
+      font-size: 2rem;
+      letter-spacing: 0.15em;
+      color: #57c3b0;
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      color: #666;
+      font-size: 0.85rem;
+      margin-bottom: 40px;
+      letter-spacing: 0.05em;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 680px;
+      background: #111;
+      border: 1px solid #222;
+      border-radius: 8px;
+      padding: 28px;
+    }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 24px;
+      border-bottom: 1px solid #222;
+    }
+
+    .tab {
+      flex: 1;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: #555;
+      font-family: inherit;
+      font-size: 0.8rem;
+      letter-spacing: 0.08em;
+      padding: 10px;
+      cursor: pointer;
+      text-transform: uppercase;
+      transition: color 0.15s, border-color 0.15s;
+      margin-bottom: -1px;
+    }
+
+    .tab.active {
+      color: #57c3b0;
+      border-bottom-color: #57c3b0;
+    }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Shared */
+    .connect-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .wallet-status {
+      font-size: 0.8rem;
+      color: #555;
+      flex: 1;
+      word-break: break-all;
+    }
+
+    .wallet-status.connected { color: #57c3b0; }
+
+    button {
+      background: #57c3b0;
+      color: #0a0a0a;
+      border: none;
+      border-radius: 4px;
+      padding: 10px 20px;
+      font-family: inherit;
+      font-size: 0.85rem;
+      font-weight: bold;
+      letter-spacing: 0.05em;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    button:hover:not(:disabled) { opacity: 0.85; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    textarea {
+      width: 100%;
+      background: #0d0d0d;
+      border: 1px solid #2a2a2a;
+      border-radius: 4px;
+      color: #e0e0e0;
+      font-family: inherit;
+      font-size: 0.9rem;
+      padding: 14px;
+      resize: vertical;
+      min-height: 100px;
+      margin-bottom: 8px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    textarea:focus { border-color: #57c3b0; }
+
+    .fee-note {
+      font-size: 0.75rem;
+      color: #444;
+      margin-bottom: 16px;
+    }
+
+    .submit-row {
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .response-box {
+      margin-top: 24px;
+      border-top: 1px solid #1e1e1e;
+      padding-top: 20px;
+      display: none;
+    }
+
+    .response-box.visible { display: block; }
+
+    .response-label {
+      font-size: 0.72rem;
+      color: #555;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .response-text {
+      font-size: 0.88rem;
+      line-height: 1.7;
+      color: #ccc;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .status {
+      font-size: 0.8rem;
+      color: #57c3b0;
+      margin-top: 12px;
+      min-height: 1.2em;
+    }
+
+    .status.error { color: #e05c5c; }
+
+    /* Subscribe panel */
+    .sub-info {
+      background: #0d0d0d;
+      border: 1px solid #1e1e1e;
+      border-radius: 6px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .sub-info h3 {
+      font-size: 0.9rem;
+      color: #57c3b0;
+      margin-bottom: 12px;
+      letter-spacing: 0.05em;
+    }
+
+    .sub-info ul {
+      list-style: none;
+      font-size: 0.82rem;
+      color: #888;
+      line-height: 2;
+    }
+
+    .sub-info ul li::before { content: "→  "; color: #57c3b0; }
+
+    .tg-link {
+      display: block;
+      margin-top: 20px;
+      padding: 16px;
+      background: #0d2e28;
+      border: 1px solid #1a5046;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      color: #57c3b0;
+      text-decoration: none;
+      text-align: center;
+      letter-spacing: 0.05em;
+    }
+
+    .tg-link:hover { background: #0f3d34; }
+
+    .spinner {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border: 2px solid #57c3b0;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <h1>AXIOM</h1>
+  <p class="subtitle">TaoPunk #2767 &mdash; Bittensor Research Agent</p>
+
+  <div class="card">
+    <!-- Wallet row (shared) -->
+    <div class="connect-row">
+      <button id="connectBtn" onclick="connectWallet()">Connect Wallet</button>
+      <span class="wallet-status" id="walletStatus">Not connected</span>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('query')">Ask Once</button>
+      <button class="tab" onclick="switchTab('subscribe')">Subscribe</button>
+    </div>
+
+    <!-- Ask Once panel -->
+    <div class="tab-panel active" id="panel-query">
+      <textarea id="questionInput" placeholder="Ask anything about Bittensor — subnets, validators, emissions, staking…" disabled></textarea>
+      <p class="fee-note">One-time fee: 0.0001 TAO &nbsp;·&nbsp; Paid on-chain to TaoPunk #2767</p>
+      <div class="submit-row">
+        <button id="submitBtn" onclick="submitQuery()" disabled>Ask Axiom</button>
+      </div>
+      <div class="status" id="queryStatus"></div>
+      <div class="response-box" id="responseBox">
+        <p class="response-label">Axiom &mdash; Response</p>
+        <p class="response-text" id="responseText"></p>
+      </div>
+    </div>
+
+    <!-- Subscribe panel -->
+    <div class="tab-panel" id="panel-subscribe">
+      <div class="sub-info">
+        <h3>Monthly Access — 0.0001 TAO / month</h3>
+        <ul>
+          <li>Unlimited questions via Telegram</li>
+          <li>Subnet research memos (PDF)</li>
+          <li>Curated watchlists</li>
+          <li>Live on-chain data, Reddit sentiment</li>
+        </ul>
+      </div>
+      <p class="fee-note">Pay 0.0001 TAO directly to the agent wallet &nbsp;·&nbsp; 30-day access</p>
+      <div class="submit-row">
+        <button id="subBtn" onclick="subscribe()" disabled>Pay &amp; Get Telegram Access</button>
+      </div>
+      <div class="status" id="subStatus"></div>
+      <div id="tgLinkBox"></div>
+    </div>
+  </div>
+
+  <script>
+    const REGISTRY   = "0xbbf7a43ae525a0ea9b8210bcae664bb4c4848f60";
+    const PUNK_ID    = 2767;
+    const CHAIN_ID   = 964;
+    const CHAIN_HEX  = "0x" + CHAIN_ID.toString(16);
+    const RPC_URL    = "https://lite.chain.opentensor.ai";
+    const API_BASE    = "https://axiom-bittensor-agent-production.up.railway.app";
+    const FEE_WEI     = "0x" + (100000000000000n).toString(16);
+    const HALF_FEE    = "0x" + (50000000000000n).toString(16);  // 0.00005 TAO each
+
+    const QUERY_SIG   = "0x045cf2f6"; // keccak256("query(uint256,bytes32)")[0:4]
+
+    let userAddress   = null;
+    let ownerWallet   = null;
+    let partnerWallet = null;
+
+    // ── Load config ───────────────────────────────────────────────────────────
+
+    fetch(`${API_BASE}/config`)
+      .then(r => r.json())
+      .then(cfg => {
+        ownerWallet   = cfg.owner_wallet;
+        partnerWallet = cfg.partner_wallet;
+      })
+      .catch(() => {});
+
+    // ── Tabs ──────────────────────────────────────────────────────────────────
+
+    function switchTab(name) {
+      document.querySelectorAll(".tab").forEach((t, i) => {
+        t.classList.toggle("active", ["query","subscribe"][i] === name);
+      });
+      document.querySelectorAll(".tab-panel").forEach(p => {
+        p.classList.toggle("active", p.id === "panel-" + name);
+      });
+    }
+
+    // ── Wallet ────────────────────────────────────────────────────────────────
+
+    async function connectWallet() {
+      if (!window.ethereum) {
+        setStatus("queryStatus", "MetaMask not detected. Please install it.", true);
+        return;
+      }
+      try {
+        const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+        userAddress = accounts[0];
+        await switchChain();
+        onConnected();
+      } catch (e) {
+        setStatus("queryStatus", "Connection rejected.", true);
+      }
+    }
+
+    async function switchChain() {
+      try {
+        await window.ethereum.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: CHAIN_HEX }],
+        });
+      } catch (err) {
+        if (err.code === 4902) {
+          await window.ethereum.request({
+            method: "wallet_addEthereumChain",
+            params: [{
+              chainId: CHAIN_HEX,
+              chainName: "Opentensor EVM",
+              nativeCurrency: { name: "TAO", symbol: "TAO", decimals: 18 },
+              rpcUrls: [RPC_URL],
+            }],
+          });
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    function onConnected() {
+      const short = userAddress.slice(0, 6) + "…" + userAddress.slice(-4);
+      document.getElementById("walletStatus").textContent = short;
+      document.getElementById("walletStatus").classList.add("connected");
+      document.getElementById("connectBtn").textContent = "Connected";
+      document.getElementById("connectBtn").disabled = true;
+      document.getElementById("questionInput").disabled = false;
+      document.getElementById("submitBtn").disabled = false;
+      document.getElementById("subBtn").disabled = false;
+    }
+
+    // ── Hashing ───────────────────────────────────────────────────────────────
+
+    async function sha256Hex(text) {
+      const buf = new TextEncoder().encode(text);
+      const hash = await crypto.subtle.digest("SHA-256", buf);
+      return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    // ── ABI encode ────────────────────────────────────────────────────────────
+
+    function encodeQueryCalldata(punkId, inputHashHex) {
+      const punkIdPadded    = BigInt(punkId).toString(16).padStart(64, "0");
+      const inputHashPadded = inputHashHex.padStart(64, "0");
+      return QUERY_SIG + punkIdPadded + inputHashPadded;
+    }
+
+    // ── Ask Once ──────────────────────────────────────────────────────────────
+
+    async function submitQuery() {
+      const question = document.getElementById("questionInput").value.trim();
+      if (!question) return;
+
+      document.getElementById("submitBtn").disabled = true;
+      document.getElementById("responseBox").classList.remove("visible");
+      setStatus("queryStatus", '<span class="spinner"></span> Hashing question…');
+
+      try {
+        const inputHash = await sha256Hex(question);
+
+        setStatus("queryStatus", '<span class="spinner"></span> Waiting for wallet confirmation…');
+        const calldata = encodeQueryCalldata(PUNK_ID, inputHash);
+        const txHash = await window.ethereum.request({
+          method: "eth_sendTransaction",
+          params: [{ from: userAddress, to: REGISTRY, value: FEE_WEI, data: calldata }],
+        });
+
+        setStatus("queryStatus", '<span class="spinner"></span> Transaction sent — waiting for confirmation…');
+        const receipt = await waitForReceipt(txHash);
+        if (!receipt || receipt.status === "0x0") {
+          setStatus("queryStatus", "Transaction failed on-chain.", true);
+          document.getElementById("submitBtn").disabled = false;
+          return;
+        }
+
+        const queryId = parseInt(receipt.logs[0].topics[1], 16);
+
+        setStatus("queryStatus", '<span class="spinner"></span> Submitting query to agent…');
+        await fetch(`${API_BASE}/relay`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ queryId, input: question }),
+        });
+
+        setStatus("queryStatus", '<span class="spinner"></span> Waiting for Axiom&#39;s response…');
+        const result = await pollResult(queryId);
+
+        document.getElementById("responseText").textContent = result;
+        document.getElementById("responseBox").classList.add("visible");
+        setStatus("queryStatus", "");
+      } catch (e) {
+        console.error(e);
+        setStatus("queryStatus", e.message || "Something went wrong.", true);
+      }
+
+      document.getElementById("submitBtn").disabled = false;
+    }
+
+    // ── Subscribe ─────────────────────────────────────────────────────────────
+
+    async function subscribe() {
+      if (!ownerWallet || !partnerWallet) {
+        setStatus("subStatus", "Wallet config not loaded yet — try again.", true);
+        return;
+      }
+
+      document.getElementById("subBtn").disabled = true;
+      document.getElementById("tgLinkBox").innerHTML = "";
+
+      try {
+        let txHash1, txHash2 = null;
+
+        if (partnerWallet) {
+          // Split payment — two transactions of 0.00005 TAO each
+          setStatus("subStatus", '<span class="spinner"></span> Payment 1 of 2 — confirm in MetaMask…');
+          txHash1 = await window.ethereum.request({
+            method: "eth_sendTransaction",
+            params: [{ from: userAddress, to: ownerWallet, value: HALF_FEE }],
+          });
+          setStatus("subStatus", '<span class="spinner"></span> Payment 1 confirming…');
+          const receipt1 = await waitForReceipt(txHash1);
+          if (!receipt1 || receipt1.status === "0x0") {
+            setStatus("subStatus", "Payment 1 failed on-chain.", true);
+            document.getElementById("subBtn").disabled = false;
+            return;
+          }
+
+          setStatus("subStatus", '<span class="spinner"></span> Payment 2 of 2 — confirm in MetaMask…');
+          txHash2 = await window.ethereum.request({
+            method: "eth_sendTransaction",
+            params: [{ from: userAddress, to: partnerWallet, value: HALF_FEE }],
+          });
+          setStatus("subStatus", '<span class="spinner"></span> Payment 2 confirming…');
+          const receipt2 = await waitForReceipt(txHash2);
+          if (!receipt2 || receipt2.status === "0x0") {
+            setStatus("subStatus", "Payment 2 failed on-chain.", true);
+            document.getElementById("subBtn").disabled = false;
+            return;
+          }
+        } else {
+          // Single wallet — full 0.0001 TAO
+          setStatus("subStatus", '<span class="spinner"></span> Confirm payment in MetaMask…');
+          txHash1 = await window.ethereum.request({
+            method: "eth_sendTransaction",
+            params: [{ from: userAddress, to: ownerWallet, value: FEE_WEI }],
+          });
+          setStatus("subStatus", '<span class="spinner"></span> Transaction confirming…');
+          const receipt1 = await waitForReceipt(txHash1);
+          if (!receipt1 || receipt1.status === "0x0") {
+            setStatus("subStatus", "Transaction failed on-chain.", true);
+            document.getElementById("subBtn").disabled = false;
+            return;
+          }
+        }
+
+        // Activate subscription
+        setStatus("subStatus", '<span class="spinner"></span> Activating subscription…');
+        const res = await fetch(`${API_BASE}/subscribe`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet: userAddress, tx_hash_1: txHash1, tx_hash_2: txHash2 }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || "Subscription activation failed.");
+        }
+
+        const data = await res.json();
+        setStatus("subStatus", "Subscription active for 30 days.");
+
+        if (data.telegram_link) {
+          document.getElementById("tgLinkBox").innerHTML =
+            `<a class="tg-link" href="${data.telegram_link}" target="_blank">Open Axiom on Telegram →</a>`;
+        }
+      } catch (e) {
+        console.error(e);
+        setStatus("subStatus", e.message || "Something went wrong.", true);
+        document.getElementById("subBtn").disabled = false;
+      }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    async function waitForReceipt(txHash, maxAttempts = 40, intervalMs = 3000) {
+      for (let i = 0; i < maxAttempts; i++) {
+        await sleep(intervalMs);
+        const receipt = await window.ethereum.request({
+          method: "eth_getTransactionReceipt",
+          params: [txHash],
+        });
+        if (receipt) return receipt;
+      }
+      throw new Error("Transaction not confirmed after 2 minutes.");
+    }
+
+    async function pollResult(queryId, maxAttempts = 40, intervalMs = 5000) {
+      for (let i = 0; i < maxAttempts; i++) {
+        await sleep(intervalMs);
+        const res = await fetch(`${API_BASE}/relay/${queryId}`);
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (data.status === "fulfilled") return data.result;
+      }
+      throw new Error("Agent did not respond in time.");
+    }
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    function setStatus(id, html, isError = false) {
+      const el = document.getElementById(id);
+      el.innerHTML = html;
+      el.className = "status" + (isError ? " error" : "");
+    }
+  </script>
+</body>
+</html>
