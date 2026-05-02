@@ -322,15 +322,16 @@ def get_latest_validator_stakes(netuid: int) -> dict:
 
 def get_latest_uids(netuid: int) -> set | None:
     with get_conn() as conn:
-        rows = _rows(conn, """
-            SELECT uid FROM validator_snapshots
-            WHERE netuid = %s AND ts = (
-                SELECT MAX(ts) FROM validator_snapshots WHERE netuid = %s
-            )
-        """, (netuid, netuid))
-    if not rows:
-        return None
-    return {r["uid"] for r in rows}
+        latest_ts = _one(conn, """
+            SELECT MAX(ts) as max_ts FROM validator_snapshots WHERE netuid = %s
+        """, (netuid,))
+        if not latest_ts or latest_ts["max_ts"] is None:
+            return None
+        ts = latest_ts["max_ts"]
+        v_rows = _rows(conn, "SELECT uid FROM validator_snapshots WHERE netuid = %s AND ts = %s", (netuid, ts))
+        m_rows = _rows(conn, "SELECT uid FROM miner_snapshots WHERE netuid = %s AND ts = %s", (netuid, ts))
+    uids = {r["uid"] for r in v_rows} | {r["uid"] for r in m_rows}
+    return uids if uids else None
 
 
 def get_churn_history(netuid: int, days: int = 30) -> list[dict]:
