@@ -303,6 +303,7 @@
       document.getElementById("connectBtn").disabled = true;
       document.getElementById("questionInput").disabled = false;
       document.getElementById("submitBtn").disabled = false;
+      document.getElementById("subBtn").disabled = false;
     }
 
     // ── Load config ───────────────────────────────────────────────────────────
@@ -472,13 +473,42 @@
     // ── Subscribe ─────────────────────────────────────────────────────────────
 
     async function subscribe() {
-      if (!ownerWallet || !partnerWallet) {
-        setStatus("subStatus", "Wallet config not loaded yet — try again.", true);
+      document.getElementById("subBtn").disabled = true;
+      document.getElementById("tgLinkBox").innerHTML = "";
+
+      // Dev mode — skip all chain logic
+      if (devPassword) {
+        setStatus("subStatus", '<span class="spinner"></span> Dev mode — activating subscription…');
+        try {
+          const res = await fetch(`${API_BASE}/dev/subscribe`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wallet: "dev-wallet", password: devPassword }),
+          });
+          if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || "Dev subscribe failed");
+          }
+          const data = await res.json();
+          setStatus("subStatus", "Dev subscription active for 30 days.");
+          if (data.telegram_link) {
+            document.getElementById("tgLinkBox").innerHTML =
+              `<a class="tg-link" href="${data.telegram_link}" target="_blank">Open Axiom on Telegram →</a>`;
+          } else {
+            setStatus("subStatus", "Subscribed — but BOT_USERNAME not configured on server.", true);
+          }
+        } catch (e) {
+          setStatus("subStatus", e.message || "Something went wrong.", true);
+          document.getElementById("subBtn").disabled = false;
+        }
         return;
       }
 
-      document.getElementById("subBtn").disabled = true;
-      document.getElementById("tgLinkBox").innerHTML = "";
+      if (!ownerWallet || !partnerWallet) {
+        setStatus("subStatus", "Wallet config not loaded yet — try again.", true);
+        document.getElementById("subBtn").disabled = false;
+        return;
+      }
 
       try {
         let txHash1, txHash2 = null;

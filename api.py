@@ -176,6 +176,24 @@ async def config():
     }
 
 
+class DevSubscribeIn(BaseModel):
+    wallet:   str
+    password: str
+
+
+@app.post("/dev/subscribe")
+async def dev_subscribe(req: DevSubscribeIn):
+    dev_password = os.getenv("DEV_PASSWORD", "")
+    if not dev_password or req.password != dev_password:
+        raise HTTPException(status_code=401, detail="Invalid dev password")
+    expires_at = int(time.time()) + SUB_DURATION_SEC
+    store.upsert_subscription(req.wallet, "dev", expires_at)
+    code = store.create_access_code(req.wallet)
+    bot_username = os.getenv("BOT_USERNAME", "")
+    telegram_link = f"https://t.me/{bot_username}?start={code}" if bot_username else None
+    return {"ok": True, "expires_at": expires_at, "telegram_link": telegram_link}
+
+
 class SubscribeIn(BaseModel):
     wallet:    str
     tx_hash_1: str
