@@ -39,20 +39,19 @@ def init_db():
         with conn.cursor() as cur:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS subnet_snapshots (
-                    id              SERIAL PRIMARY KEY,
-                    ts              INTEGER NOT NULL,
-                    netuid          INTEGER NOT NULL,
-                    neuron_count    INTEGER,
-                    max_neurons     INTEGER,
-                    reg_cost_tao    REAL,
-                    emission_value  REAL,
-                    total_stake_tao REAL,
+                    id                 SERIAL PRIMARY KEY,
+                    ts                 INTEGER NOT NULL,
+                    netuid             INTEGER NOT NULL,
+                    neuron_count       INTEGER,
+                    max_neurons        INTEGER,
+                    reg_cost_tao       REAL,
+                    total_stake_tao    REAL,
                     total_emission_tao REAL,
-                    validator_count INTEGER,
-                    miner_count     INTEGER,
-                    alpha_price_tao REAL,
-                    tempo           INTEGER,
-                    immunity_period INTEGER
+                    validator_count    INTEGER,
+                    miner_count        INTEGER,
+                    alpha_price_tao    REAL,
+                    tempo              INTEGER,
+                    immunity_period    INTEGER
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_subnet_ts ON subnet_snapshots(netuid, ts)")
@@ -110,14 +109,13 @@ def init_db():
 
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS miner_snapshots (
-                    id           SERIAL PRIMARY KEY,
-                    ts           INTEGER NOT NULL,
-                    netuid       INTEGER NOT NULL,
-                    uid          INTEGER NOT NULL,
-                    hotkey       TEXT,
-                    incentive    REAL,
-                    consensus    REAL,
-                    emission_tao REAL
+                    id        SERIAL PRIMARY KEY,
+                    ts        INTEGER NOT NULL,
+                    netuid    INTEGER NOT NULL,
+                    uid       INTEGER NOT NULL,
+                    hotkey    TEXT,
+                    incentive REAL,
+                    consensus REAL
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_miner_ts ON miner_snapshots(netuid, ts)")
@@ -205,14 +203,14 @@ def insert_subnet_snapshot(ts: int, netuid: int, data: dict):
             cur.execute("""
                 INSERT INTO subnet_snapshots
                     (ts, netuid, neuron_count, max_neurons, reg_cost_tao,
-                     emission_value, total_stake_tao, total_emission_tao,
+                     total_stake_tao, total_emission_tao,
                      validator_count, miner_count, alpha_price_tao,
                      tempo, immunity_period)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """, (
                 ts, netuid,
                 data.get("neuron_count"), data.get("max_neurons"),
-                data.get("reg_cost_tao"), data.get("emission_value"),
+                data.get("reg_cost_tao"),
                 data.get("total_stake_tao"), data.get("total_emission_tao"),
                 data.get("validator_count"), data.get("miner_count"),
                 data.get("alpha_price_tao"), data.get("tempo"),
@@ -347,11 +345,10 @@ def insert_miner_snapshots(ts: int, netuid: int, miners: list):
     with get_conn() as conn:
         with conn.cursor() as cur:
             psycopg2.extras.execute_values(cur, """
-                INSERT INTO miner_snapshots (ts, netuid, uid, hotkey, incentive, consensus, emission_tao)
+                INSERT INTO miner_snapshots (ts, netuid, uid, hotkey, incentive, consensus)
                 VALUES %s
             """, [
-                (ts, netuid, m["uid"], m.get("hotkey"), m.get("incentive"),
-                 m.get("consensus"), m.get("emission_tao"))
+                (ts, netuid, m["uid"], m.get("hotkey"), m.get("incentive"), m.get("consensus"))
                 for m in miners
             ])
 

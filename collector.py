@@ -197,7 +197,7 @@ async def collect_once(reader):
 
     # ── Network info ──────────────────────────────────────────────────────────
     try:
-        net = await reader._call({"action": "network_info"}, timeout=30)
+        net = await reader._call({"action": "network_info"}, timeout=90)
         if "error" not in net:
             store.insert_network_snapshot(ts, net)
     except Exception as e:
