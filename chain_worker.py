@@ -44,6 +44,7 @@ def get_subnet_detail(sub, netuid: int) -> dict:
     hp_items = {
         "kappa": ("SubtensorModule", "Kappa"),
         "rho": ("SubtensorModule", "Rho"),
+        "tempo": ("SubtensorModule", "Tempo"),
         "min_allowed_weights": ("SubtensorModule", "MinAllowedWeights"),
         "max_weight_limit": ("SubtensorModule", "MaxWeightsLimit"),
         "immunity_period": ("SubtensorModule", "ImmunityPeriod"),
@@ -139,10 +140,8 @@ def _metagraph_from_full(sub, netuid: int) -> dict:
             "validator_permit": bool(getattr(n, "validator_permit", False)),
         })
 
-    top_validators = sorted(
-        [x for x in neurons if x["validator_permit"]],
-        key=lambda x: (x["stake"], x["dividends"]), reverse=True
-    )[:10]
+    all_validators = [x for x in neurons if x["validator_permit"]]
+    top_validators = sorted(all_validators, key=lambda x: (x["stake"], x["dividends"]), reverse=True)[:10]
     miners = [x for x in neurons if not x["validator_permit"]]
     top_miners = sorted(miners, key=lambda x: (x["incentive"], x["consensus"], x["emission_tao"]), reverse=True)[:10]
     all_miners = [{"uid": x["uid"], "hotkey": x["hotkey"], "incentive": x["incentive"],
@@ -151,6 +150,8 @@ def _metagraph_from_full(sub, netuid: int) -> dict:
     return {
         "netuid": netuid,
         "n": len(neurons),
+        "validator_count": len(all_validators),
+        "miner_count": len(miners),
         "total_stake_tao": round(sum(x["stake"] for x in neurons), 4),
         "total_emission_tao": round(sum(x["emission_tao"] for x in neurons), 6),
         "top_validators": top_validators,
@@ -225,10 +226,8 @@ def _metagraph_from_neurons_lite(sub, netuid: int) -> dict:
             "hotkey": hk[:16] + "..." if len(hk) > 16 else hk,
         })
 
-    top_validators = sorted(
-        [x for x in neurons if x["validator_permit"]],
-        key=lambda x: (x["stake"], x["dividends"]), reverse=True
-    )[:10]
+    all_validators = [x for x in neurons if x["validator_permit"]]
+    top_validators = sorted(all_validators, key=lambda x: (x["stake"], x["dividends"]), reverse=True)[:10]
     miners = [x for x in neurons if not x["validator_permit"]]
     top_miners = sorted(miners, key=lambda x: (x["incentive"], x["consensus"], x["emission_tao"]), reverse=True)[:10]
     all_miners = [{"uid": x["uid"], "hotkey": x["hotkey"], "incentive": x["incentive"],
@@ -237,6 +236,8 @@ def _metagraph_from_neurons_lite(sub, netuid: int) -> dict:
     return {
         "netuid": netuid,
         "n": len(neurons),
+        "validator_count": len(all_validators),
+        "miner_count": len(miners),
         "total_stake_tao": round(sum(x["stake"] for x in neurons), 4),
         "total_emission_tao": round(sum(x["emission_tao"] for x in neurons), 6),
         "top_validators": top_validators,
@@ -306,10 +307,8 @@ def _metagraph_from_storage(sub, netuid: int) -> dict:
             "hotkey": hk_str[:16] + "..." if len(hk_str) > 16 else hk_str,
         })
 
-    top_validators = sorted(
-        [x for x in neurons if x["validator_permit"]],
-        key=lambda x: (x["stake"], x["dividends"]), reverse=True
-    )[:10]
+    all_validators = [x for x in neurons if x["validator_permit"]]
+    top_validators = sorted(all_validators, key=lambda x: (x["stake"], x["dividends"]), reverse=True)[:10]
     miners = [x for x in neurons if not x["validator_permit"]]
     top_miners = sorted(miners, key=lambda x: (x["incentive"], x["consensus"], x["emission_tao"]), reverse=True)[:10]
     all_miners = [{"uid": x["uid"], "hotkey": x["hotkey"], "incentive": x["incentive"],
@@ -318,6 +317,8 @@ def _metagraph_from_storage(sub, netuid: int) -> dict:
     return {
         "netuid": netuid,
         "n": n,
+        "validator_count": len(all_validators),
+        "miner_count": len(miners),
         "total_stake_tao": round(sum(x["stake"] for x in neurons), 4),
         "total_emission_tao": round(sum(x["emission_tao"] for x in neurons), 6),
         "top_validators": top_validators,

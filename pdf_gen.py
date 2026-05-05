@@ -166,9 +166,14 @@ def _add_network_health_table(story, header_display: str, body: str, styles: dic
         if not line or ":" not in line:
             continue
         label, _, value = line.partition(":")
-        rows.append([label.strip(), value.strip()])
+        value = value.strip()
+        if value.upper() in ("N/A", "NA", "NONE", "NULL", "UNKNOWN", ""):
+            continue
+        rows.append([label.strip(), value])
 
     if not rows:
+        story.append(Paragraph("Network data unavailable for this subnet.", styles["body"]))
+        story.append(Spacer(1, 8))
         return
 
     col_w = (PAGE_W - 2 * MARGIN) / 2

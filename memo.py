@@ -26,7 +26,9 @@ One tight paragraph. Name the real-world problem this subnet is solving. Describ
 
 NETWORK HEALTH
 Output key-value pairs only, one per line, in exactly this format: Label: Value
-Include all available fields: Neurons, Registration Cost, Tempo, Immunity Period, Active Validators, Active Miners, Total Stake, Alpha Price, Data As Of
+Include only fields where real data is available — omit any field entirely if the value is unknown, missing, or N/A. Do not output placeholder rows.
+If no data at all is available for this subnet, output a single line: Status: Data unavailable — metagraph fetch failed
+Fields to include when available: Neurons, Registration Cost, Tempo, Immunity Period, Active Validators, Active Miners, Total Stake, Alpha Price, Data As Of
 Example line: Neurons: 201 / 256
 
 MARKET POSITION

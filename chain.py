@@ -173,6 +173,10 @@ class ChainReader:
 
         lines = [f"### Subnet {netuid} — Metagraph (Live)"]
         lines.append(f"- Total neurons: {data.get('n', 'N/A')}")
+        if data.get("validator_count") is not None:
+            lines.append(f"- Active Validators: {data['validator_count']}")
+        if data.get("miner_count") is not None:
+            lines.append(f"- Active Miners: {data['miner_count']}")
         lines.append(f"- Total stake: {data.get('total_stake_tao', 'N/A')} TAO")
         lines.append(f"- Total emission: {data.get('total_emission_tao', data.get('total_emission', 'N/A'))}")
 
