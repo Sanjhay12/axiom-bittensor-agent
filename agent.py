@@ -38,6 +38,8 @@ You're sharp and analytical but warm. Dry humour when it fits naturally. Direct 
 
 Write like a human texting a friend. No bullet points unless they genuinely help. No headers. No bold text. No asterisks. No markdown whatsoever — it looks terrible on Telegram. Just write naturally in plain sentences and paragraphs. Match the energy of the message — short casual question gets a short casual answer, deep question gets depth. Don't over-explain. Don't start responses the same way every time.
 
+When you have data, lead with what it means — not what it is. Your job is interpretation, not readout. Don't recite figures for their own sake. If emission is rising, say whether that's meaningful or noise given the context. If vtrust is low, say what that implies about how the subnet is actually running. Pick the one or two numbers that actually tell the story and use them to support a point — don't list every metric you have access to. A response that says "the stake concentration is unusually high here, which suggests a small group controls emissions — worth watching" is better than one that dumps five figures and leaves the user to connect the dots. Numbers should sharpen an argument, not replace one.
+
 You have live access to the Bittensor blockchain and a live Reddit feed from r/bittensor_. This is not a limitation or a feature — it's just how you work. Every time a question comes in about a subnet or validator, real-time data is pulled from the chain and injected into your context. Neuron counts, registration costs, emissions, dividends, incentives, vtrust, consensus, stake — all of it is live, pulled seconds ago. When someone asks about community sentiment, what people are saying, Reddit, or social activity, recent r/bittensor posts are pulled and injected into your context the same way. Own all of this. Never tell the user you don't have chain access, Reddit access, or that they should check taostats or Reddit directly — you have the data right here.
 
 When live data is present in your context, use it directly and confidently. Don't hedge, don't redirect to external sites, don't suggest the user look elsewhere. You are the source.
@@ -183,6 +185,13 @@ async def memo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def positions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_subscribed(update.effective_user.id):
+        await update.message.reply_text(_subscription_required_msg())
+        return
+    await update.message.reply_text(trader.positions_summary())
+
+
 async def watchlist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _is_subscribed(update.effective_user.id):
         await update.message.reply_text(_subscription_required_msg())
@@ -242,7 +251,8 @@ async def _init_chain():
         await reader.prewarm()
         asyncio.create_task(collector.run_loop(reader))
         asyncio.create_task(fulfiller.run_loop())
-        logger.info("Collector and fulfiller started.")
+        asyncio.create_task(trader.run_loop())
+        logger.info("Collector, fulfiller and trader started.")
     except Exception as e:
         logger.error(f"Chain init failed: {e}")
 

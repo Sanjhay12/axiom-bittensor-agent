@@ -1,15 +1,18 @@
 import io
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
-from reportlab.lib.colors import HexColor, black
+from reportlab.lib.colors import HexColor, black, white
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Table, TableStyle, Image
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_JUSTIFY, TA_LEFT
+from reportlab.graphics.shapes import Drawing, String, Line, Rect
+from reportlab.graphics.charts.lineplots import LinePlot
+from reportlab.graphics import renderPDF
 
 LOGO_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "logo.png"))
 
@@ -104,9 +107,10 @@ def _esc(s: str) -> str:
 
 _SECTION_NAMES = (
     r'OVERVIEW|CORE INSIGHT|HOW IT WORKS|NETWORK HEALTH|COMPETITIVE LANDSCAPE|'
-    r'VALIDATOR LANDSCAPE|MINER LANDSCAPE|EMISSIONS? (?:AND|&) ECONOMICS|'
-    r'DEVELOPMENT ACTIVITY|RISK FACTORS|KEY RISKS|INVESTMENT VIEW|VERDICT|'
-    r'RECOMMENDATIONS|COMPARISON|TOKENOMICS'
+    r'MARKET POSITION|VALIDATOR LANDSCAPE|MINER LANDSCAPE|EMISSIONS? (?:AND|&) ECONOMICS|'
+    r'NETWORK DYNAMICS|ECONOMICS|DEVELOPMENT ACTIVITY|RISK FACTORS|KEY RISKS|'
+    r'INVESTMENT VIEW|VERDICT|RECOMMENDATIONS|DECISION GUIDE|WHAT CHANGED|'
+    r'SOURCE APPENDIX|COMPARISON|TOKENOMICS'
 )
 
 _SECTION_DISPLAY = {
@@ -114,6 +118,12 @@ _SECTION_DISPLAY = {
     "EMISSIONS AND ECONOMICS": "Emission & Economics",
     "EMISSION & ECONOMICS": "Emission & Economics",
     "EMISSIONS & ECONOMICS": "Emission & Economics",
+    "MARKET POSITION": "Market Position",
+    "NETWORK DYNAMICS": "Network Dynamics",
+    "ECONOMICS": "Economics",
+    "DECISION GUIDE": "Decision Guide",
+    "WHAT CHANGED": "What Changed",
+    "SOURCE APPENDIX": "Source Appendix",
 }
 
 
@@ -201,6 +211,148 @@ def _add_recommendations(story, body: str, styles: dict):
     story.append(Spacer(1, 4))
 
 
+def _make_sparkline(data_points: list, title: str, width: float = 240, height: float = 110) -> Drawing | None:
+    """Render a simple line chart as a reportlab Drawing. data_points: [(ts, value), ...]"""
+    clean = [(ts, v) for ts, v in data_points if v is not None and v > 0]
+    if len(clean) < 2:
+        return None
+
+    drawing = Drawing(width, height)
+
+    pad_left, pad_right, pad_top, pad_bottom = 8, 8, 22, 20
+    chart_w = width - pad_left - pad_right
+    chart_h = height - pad_top - pad_bottom
+
+    # Background
+    drawing.add(Rect(0, 0, width, height, fillColor=HexColor("#F8F8F8"), strokeColor=None))
+
+    # Title
+    drawing.add(String(width / 2, height - 12, title,
+                       textAnchor="middle", fontSize=7.5, fontName="Times-Roman",
+                       fillColor=HexColor("#333333")))
+
+    xs = [p[0] for p in clean]
+    ys = [p[1] for p in clean]
+    x_min, x_max = min(xs), max(xs)
+    y_min, y_max = min(ys), max(ys)
+    x_range = max(x_max - x_min, 1)
+    y_range = max(y_max - y_min, y_max * 0.001)
+
+    def _px(ts, val):
+        rx = pad_left + (ts - x_min) / x_range * chart_w
+        ry = pad_bottom + (val - y_min) / y_range * chart_h
+        return rx, ry
+
+    # Gridline at mid-value
+    mid_y = pad_bottom + chart_h / 2
+    drawing.add(Line(pad_left, mid_y, pad_left + chart_w, mid_y,
+                     strokeColor=HexColor("#DDDDDD"), strokeWidth=0.5))
+
+    # Line segments
+    for i in range(len(clean) - 1):
+        x1, y1 = _px(*clean[i])
+        x2, y2 = _px(*clean[i + 1])
+        drawing.add(Line(x1, y1, x2, y2, strokeColor=HexColor("#1A1A1A"), strokeWidth=1.2))
+
+    # Start / end labels
+    start_ts, start_val = clean[0]
+    end_ts, end_val = clean[-1]
+    start_dt = datetime.fromtimestamp(start_ts, timezone.utc).strftime("%b %d")
+    end_dt = datetime.fromtimestamp(end_ts, timezone.utc).strftime("%b %d")
+
+    drawing.add(String(pad_left, pad_bottom - 12, start_dt,
+                       fontSize=6.5, fontName="Times-Roman", fillColor=GREY))
+    drawing.add(String(pad_left + chart_w, pad_bottom - 12, end_dt,
+                       textAnchor="end", fontSize=6.5, fontName="Times-Roman", fillColor=GREY))
+
+    # Latest value label
+    ex, ey = _px(*clean[-1])
+    val_label = f"{end_val:.4f}" if end_val < 1 else f"{end_val:,.2f}"
+    drawing.add(String(ex, ey + 4, val_label,
+                       textAnchor="middle", fontSize=6.5, fontName="Times-Roman",
+                       fillColor=HexColor("#1A1A1A")))
+
+    return drawing
+
+
+def _add_charts(story, chart_data: dict, styles: dict):
+    """Insert sparkline charts for available time-series data."""
+    if not chart_data:
+        return
+
+    chart_specs = [
+        ("alpha_price", "Alpha Price (TAO)"),
+        ("emission", "Total Emission (TAO)"),
+        ("reg_cost", "Registration Cost (TAO)"),
+        ("neuron_count", "Neuron Count"),
+        ("churn_rate", "Churn Rate"),
+    ]
+
+    drawings = []
+    for key, title in chart_specs:
+        series = chart_data.get(key, [])
+        d = _make_sparkline(series, title)
+        if d:
+            drawings.append(d)
+
+    if not drawings:
+        return
+
+    story.append(Paragraph("<b>Historical Trends (90 days)</b>", styles["body"]))
+    story.append(Spacer(1, 4))
+
+    chart_w = (PAGE_W - 2 * MARGIN) / 2 - 6
+    for i in range(0, len(drawings), 2):
+        pair = drawings[i:i + 2]
+        cells = [pair[0]]
+        if len(pair) == 2:
+            cells.append(pair[1])
+        else:
+            cells.append("")
+        row_table = Table([cells], colWidths=[chart_w + 6, chart_w + 6])
+        row_table.setStyle(TableStyle([
+            ("LEFTPADDING",  (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING",   (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING",(0, 0), (-1, -1), 6),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ]))
+        story.append(row_table)
+
+    story.append(Spacer(1, 6))
+
+
+def _add_decision_guide(story, body: str, styles: dict):
+    story.append(Paragraph("<b>Decision Guide</b>", styles["body"]))
+    story.append(Spacer(1, 4))
+    audience_style = ParagraphStyle("AudienceLabel", fontName="Times-Bold", fontSize=10,
+                                    textColor=black, leading=14, spaceBefore=6)
+    current_audience = None
+    current_lines = []
+
+    def _flush():
+        if current_audience and current_lines:
+            story.append(Paragraph(f'<b>{_esc(current_audience)}</b>', audience_style))
+            for l in current_lines:
+                story.append(Paragraph(_esc(l), styles["body"]))
+
+    for line in body.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        m = re.match(r'^(Miners?|Validators?|Investors?(?:/Holders?)?)\s*[:—]\s*(.+)', line, re.IGNORECASE)
+        if m:
+            _flush()
+            current_audience = m.group(1)
+            current_lines = [m.group(2)]
+        elif current_audience:
+            current_lines.append(line)
+        else:
+            story.append(Paragraph(_esc(line), styles["body"]))
+    _flush()
+    story.append(Spacer(1, 4))
+
+
 def _add_section(story, header: str, body: str, styles: dict):
     display = _SECTION_DISPLAY.get(header.upper(), header.title())
 
@@ -208,8 +360,12 @@ def _add_section(story, header: str, body: str, styles: dict):
         _add_network_health_table(story, display, body, styles)
         return
 
-    if header.upper() == "RECOMMENDATIONS":
+    if header.upper() in ("RECOMMENDATIONS",):
         _add_recommendations(story, body, styles)
+        return
+
+    if header.upper() == "DECISION GUIDE":
+        _add_decision_guide(story, body, styles)
         return
 
     label = f'<b>{_esc(display)}</b>'
@@ -313,6 +469,7 @@ def generate_pdf(
     memo_text: str,
     tagline: str = None,
     date_str: str = None,
+    chart_data: dict = None,
 ) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -338,9 +495,14 @@ def generate_pdf(
     story.append(Paragraph(re_line, styles["title"]))
     story.append(Spacer(1, 6))
 
+    charts_inserted = False
     for header, body in _parse_memo(memo_text):
         if header:
             _add_section(story, header, body, styles)
+            # Insert charts immediately after NETWORK HEALTH
+            if header.upper() == "NETWORK HEALTH" and chart_data and not charts_inserted:
+                _add_charts(story, chart_data, styles)
+                charts_inserted = True
         else:
             for line in body.split("\n"):
                 line = line.strip()
