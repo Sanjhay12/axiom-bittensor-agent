@@ -133,8 +133,8 @@ async def collect_once(reader):
             subnet_data.setdefault(netuid, {}).update({
                 "total_stake_tao":    meta.get("total_stake_tao"),
                 "total_emission_tao": meta.get("total_emission_tao"),
-                "validator_count":    len(validators),
-                "miner_count":        len(all_miners_data),
+                "validator_count":    meta.get("validator_count") or len(validators),
+                "miner_count":        meta.get("miner_count") or len(all_miners_data),
                 "neuron_count":       meta.get("n") or subnet_data.get(netuid, {}).get("neuron_count"),
             })
 

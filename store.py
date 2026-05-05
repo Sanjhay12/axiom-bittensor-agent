@@ -109,13 +109,14 @@ def init_db():
 
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS miner_snapshots (
-                    id        SERIAL PRIMARY KEY,
-                    ts        INTEGER NOT NULL,
-                    netuid    INTEGER NOT NULL,
-                    uid       INTEGER NOT NULL,
-                    hotkey    TEXT,
-                    incentive REAL,
-                    consensus REAL
+                    id           SERIAL PRIMARY KEY,
+                    ts           INTEGER NOT NULL,
+                    netuid       INTEGER NOT NULL,
+                    uid          INTEGER NOT NULL,
+                    hotkey       TEXT,
+                    incentive    REAL,
+                    consensus    REAL,
+                    emission_tao REAL
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_miner_ts ON miner_snapshots(netuid, ts)")
@@ -345,10 +346,10 @@ def insert_miner_snapshots(ts: int, netuid: int, miners: list):
     with get_conn() as conn:
         with conn.cursor() as cur:
             psycopg2.extras.execute_values(cur, """
-                INSERT INTO miner_snapshots (ts, netuid, uid, hotkey, incentive, consensus)
+                INSERT INTO miner_snapshots (ts, netuid, uid, hotkey, incentive, consensus, emission_tao)
                 VALUES %s
             """, [
-                (ts, netuid, m["uid"], m.get("hotkey"), m.get("incentive"), m.get("consensus"))
+                (ts, netuid, m["uid"], m.get("hotkey"), m.get("incentive"), m.get("consensus"), m.get("emission_tao"))
                 for m in miners
             ])
 
