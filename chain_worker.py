@@ -270,10 +270,12 @@ def _metagraph_from_storage(sub, netuid: int) -> dict:
     except Exception:
         pass
 
-    # hotkey -> stake TAO — query individually using the same key format from Keys
-    # (bulk query_map has SS58 format mismatch; individual queries use the exact string)
+    # Only query stake for validator-permit holders (avoids 256 sequential RPCs on full subnets).
+    # Miners' stake isn't shown in the output so we can skip it without losing anything.
+    validator_hotkeys = {uid_to_hk[uid] for uid in range(n)
+                        if uid < len(vp) and vp[uid] and uid in uid_to_hk}
     hk_to_stake = {}
-    for hk_str in set(uid_to_hk.values()):
+    for hk_str in validator_hotkeys:
         try:
             val = sub.substrate.query("SubtensorModule", "TotalHotkeyStake", [hk_str])
             if val is not None:

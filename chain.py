@@ -116,6 +116,10 @@ class ChainReader:
                 return json.loads(line.decode().strip())
             except asyncio.TimeoutError:
                 logger.error(f"Chain worker call timed out: {cmd}")
+                # Kill the subprocess so the stale response doesn't poison the next read.
+                self._ready = False
+                if self._proc:
+                    self._proc.kill()
                 return {"error": "timeout"}
             except Exception as e:
                 logger.error(f"Chain worker call failed: {e}")
