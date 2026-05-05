@@ -260,6 +260,14 @@ def _metagraph_from_storage(sub, netuid: int) -> dict:
     if n == 0:
         raise ValueError("no storage vectors returned")
 
+    # Derive validator_permit if the storage vector is empty (common after dTAO).
+    # Fall back to vtrust > 0, then dividends > 0, as validators are the ones
+    # actively setting weights and receiving dividends.
+    if not vp and vtrust:
+        vp = [v > 0 for v in vtrust]
+    elif not vp and dividends:
+        vp = [d > 0 for d in dividends]
+
     # uid -> hotkey SS58 string
     uid_to_hk = {}
     try:
@@ -271,7 +279,6 @@ def _metagraph_from_storage(sub, netuid: int) -> dict:
         pass
 
     # Only query stake for validator-permit holders (avoids 256 sequential RPCs on full subnets).
-    # Miners' stake isn't shown in the output so we can skip it without losing anything.
     validator_hotkeys = {uid_to_hk[uid] for uid in range(n)
                         if uid < len(vp) and vp[uid] and uid in uid_to_hk}
     hk_to_stake = {}
