@@ -546,7 +546,34 @@ def update_peak_price(netuid: int, new_price: float):
                 WHERE netuid = %s AND status = 'open'
             """, (new_price, netuid))
         
-
+def insert_model_signals(ts, netuid, signals):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for s in signals:
+                cur.execute("""
+                    INSERT INTO model_signal_history (ts, netuid, model, score, confidence)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (ts, netuid, s.model, s.score, s.confidence))
+def get_model_signals(netuid: int, days: int = 30) -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT DISTINCT ON (model) model, score, confidence FROM model_signal_history
+                WHERE netuid = %s AND ts <= %s ORDER BY model, ts DESC
+            """, (netuid, ts))
+            return [{"model":r[0], "score": r[1], "confidence": r[2]} for r in cur.fetchall()]
+def get_signal_weights(model: str) -> float:
+    with get_conn(model) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT model, weight FROM signal_weights WHERE model = %s")
+            row = cur.fetchone()
+            return row[0] if row else 1.0
+def update_signal_weight(model: str, weight: float):
+    with get_conn() as conn:
+        with conn.cursor() as curr:
+            curr.execute("""
+                INSERT INTO signal_weights (model, weight) VALUES (%s, %s)
+                ON CONFLICT (model) DO UPDATE SET weight = EXCLUDED.weight
+            """, (model, weight))
 
 # ── Subscriptions ─────────────────────────────────────────────────────────────
 

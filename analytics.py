@@ -1,8 +1,10 @@
 from dataclasses import dataclass, field
 from sklearn.ensemble import IsolationForest
+from hmmlearn.hmm import GaussianHMM
+import numpy as np
+import random
 import store
-from sklearn.ensemble import IsolationForest
-
+import numpy as np
 
 @dataclass
 class SignalResult:
@@ -521,4 +523,127 @@ def isolation_forest_anomaly(netuid: int, days: int = 30):
             reason=f"no multi-metric anomaly detected (score={latest_score:.3f})",
             meta={"isolation_score": latest_score, "avg_recent": avg_recent}
         )
+
+
+def monte_carlo_emission(netuid: int, days: int = 30, simulations: int = 100, cycles: int = 6):
+    rows = store.get_subnet_history(netuid, days=days)
+    rows = [r for r in rows if r.get("total_emission_tao") is not None]
+    if len(rows) < 8:
+        return SignalResult(
+            model="monte_carlo_emission", netuid=netuid,
+            score=0, confidence=0, reason="insufficient data"
+        )
+    emissions = [r["total_emission_tao"] for r in rows]
+    changes = [(emissions[i] - emissions[i-1]) / abs(emissions[i-1]) for i in range(1, len(emissions)) if emissions[i-1] != 0]
+    if len(changes) < 4:
+        return SignalResult(
+            model="monte_carlo_emission", netuid=netuid,
+            score=0, confidence=0.5, reason="not enough emission change data"
+        )
+
+    mean = sum(changes) / len(changes)
+    std = (sum((c - mean) ** 2 for c in changes) / len(changes)) ** 0.5
+
+    if std == 0:
+        return SignalResult(
+            model="monte_carlo_emission", netuid=netuid,
+            score=0, confidence=0.5, reason="no variation in emission changes"
+        )
+
+    current = emissions[-1]
+    final_values = []
+    for _ in range(simulations):
+        value = current
+        for _ in range(cycles):
+            change = random.gauss(mean, std)
+            value *= (1 + change)
+        final_values.append(value)
+
+    prob_up   = sum(1 for v in final_values if v > current * 1.10) / simulations
+    prob_down = sum(1 for v in final_values if v < current * 0.80) / simulations
+    confidence = min(0.5 + len(rows) / 100, 0.85)
+
+    if prob_up > 0.60:
+        return SignalResult(
+            model="monte_carlo_emission", netuid=netuid,
+            score=6, confidence=confidence,
+            reason=f"MC: {prob_up:.0%} chance emission up 10%+ in {cycles} cycles",
+            meta={"prob_up": prob_up, "prob_down": prob_down, "mean_change": mean, "std": std}
+        )
+    elif prob_up > 0.40:
+        return SignalResult(
+            model="monte_carlo_emission", netuid=netuid,
+            score=3, confidence=confidence,
+            reason=f"MC: {prob_up:.0%} chance emission up 10%+ in {cycles} cycles",
+            meta={"prob_up": prob_up, "prob_down": prob_down, "mean_change": mean, "std": std}
+        )
+    elif prob_down > 0.60:
+        return SignalResult(
+            model="monte_carlo_emission", netuid=netuid,
+            score=-7, confidence=confidence,
+            reason=f"MC: {prob_down:.0%} chance emission down 20%+ in {cycles} cycles",
+            meta={"prob_up": prob_up, "prob_down": prob_down, "mean_change": mean, "std": std}
+        )
+    elif prob_down > 0.40:
+        return SignalResult(
+            model="monte_carlo_emission", netuid=netuid,
+            score=-4, confidence=confidence,
+            reason=f"MC: {prob_down:.0%} chance emission down 20%+ in {cycles} cycles",
+            meta={"prob_up": prob_up, "prob_down": prob_down, "mean_change": mean, "std": std}
+        )
+    else:
+        return SignalResult(
+            model="monte_carlo_emission", netuid=netuid,
+            score=0, confidence=confidence,
+            reason=f"MC: no dominant scenario (up {prob_up:.0%}, down {prob_down:.0%})",
+            meta={"prob_up": prob_up, "prob_down": prob_down, "mean_change": mean, "std": std}
+        )
+    
+def hmm_regime_detection(netuid: int, days: int = 30):
+    rows = store.get_subnet_history(netuid, days=days)
+    rows = [r for r in rows if r.get("alpha_price_tao") is not None and r.get("total_emission_tao") is not None and r.get("total_stake_tao") is not None]
+    if len(rows) < 30:
+        return SignalResult(
+            model="hmm_regime_detection", netuid=netuid,
+            score=0, confidence=0, reason="insufficient data"
+        )
+    features = []
+    for i in range(1, len(rows)):
+        price_change = (rows[i]["alpha_price_tao"] - rows[i-1]["alpha_price_tao"]) / abs(rows[i-1]["alpha_price_tao"])
+        emission_change = (rows[i]["total_emission_tao"] - rows[i-1]["total_emission_tao"]) / abs(rows[i-1]["total_emission_tao"])
+        stake_change = (rows[i]["total_stake_tao"] - rows[i-1]["total_stake_tao"]) / abs(rows[i-1]["total_stake_tao"])
+        features.append([price_change, emission_change, stake_change])
+
+    X = np.array(features)
+
+    model = GaussianHMM(n_components=3, covariance_type="diag", n_iter=100, random_state=42)
+    model.fit(X)
+    states = model.predict(X)
+    current_state = states[-1]
+
+    state_emission_means = []
+    for s in range(3):
+        rows_in_state = X[states == s, 1]
+        if len(rows_in_state) > 0:
+            state_emission_means.append(rows_in_state.mean())
+        else:
+            state_emission_means.append(0)
+    bullish_state = int(np.argmax(state_emission_means))
+    bearish_state = int(np.argmin(state_emission_means))
+
+    if current_state == bullish_state:
+        score, confidence, label = 7, 0.75, "bullish"
+    elif current_state == bearish_state:
+        score, confidence, label = -7, 0.75, "bearish"
+    else:
+        score, confidence, label = 0, 0.5, "neutral"
+
+    return SignalResult(
+        model="hmm_regime_detection", netuid=netuid,
+        score=score, confidence=confidence,
+        reason=f"HMM regime detection: current state {current_state} classified as {label}",
+        meta={"current_state": current_state, "state_emission_means": state_emission_means}
+    )
+    
+
 

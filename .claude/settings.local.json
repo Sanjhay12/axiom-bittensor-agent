@@ -10,7 +10,14 @@
       "Bash(git push *)",
       "WebFetch(domain:ketchup-2.gitbook.io)",
       "WebSearch",
-      "WebFetch(domain:taopunks.io)"
+      "WebFetch(domain:taopunks.io)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\sanjh\\\\OneDrive\\\\Documents\\\\Cedar Ridge Internship\\\\bittensoragent\" -Recurse -Force)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(python -c \"from web3 import Web3; sig = 'query\\(uint256,bytes32\\)'; selector = Web3.keccak\\(text=sig\\).hex\\(\\)[:10]; print\\(f'Signature: {sig}'\\); print\\(f'Selector:  {selector}'\\)\")",
+      "Bash(pip install *)",
+      "Bash(del analytics.py risk.py trader.py)",
+      "Bash(PGPASSWORD=hIrjDWVQIQDuxduRhOXsoiYpcFTHlSke psql *)",
+      "WebFetch(domain:taopunks.com)"
     ]
   }
 }

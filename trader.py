@@ -36,8 +36,25 @@ def init_db():
                     confidence  REAL NOT NULL
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS model_signal_history (
+                    id         SERIAL PRIMARY KEY,
+                    ts         INTEGER NOT NULL,
+                    netuid     INTEGER NOT NULL,
+                    model      TEXT NOT NULL,
+                    score      REAL NOT NULL,
+                    confidence REAL NOT NULL
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS signal_weights (
+                    model   TEXT PRIMARY KEY,
+                    weight  REAL NOT NULL DEFAULT 1.0
+                )
+            """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_positions_netuid ON paper_positions(netuid, status)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_signals_netuid ON signal_history(netuid, ts)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_model_signals ON model_signal_history(netuid, ts)")
 
 
 def score_subnet(netuid):
@@ -49,17 +66,18 @@ def score_subnet(netuid):
         analytics.death_spiral_warning(netuid),
         analytics.stake_concentration_gini(netuid),
         analytics.kalman_filter_price(netuid),
-        analytics.registration_cost_velocity(netuid)
-        #analytics.isolation_forest_anomaly(netuid),
+        analytics.registration_cost_velocity(netuid),
+        analytics.isolation_forest_anomaly(netuid),
+        analytics.monte_carlo_emission(netuid)
     ]
 
-    total_weight = sum(s.confidence for s in signals if s.confidence>0)
+    total_weight = sum(s.confidence*store.get_signal_weight(s.model) for s in signals if s.confidence>0)
     if total_weight == 0:
-        return 0.0,0.0
-    weighted_score = sum(s.score * s.confidence for s in signals if s.confidence>0) / total_weight
+        return 0.0, 0.0, []
+    weighted_score = sum(s.score * s.confidence*store.get_signal_weight(s.model) for s in signals if s.confidence>0) / total_weight
     avg_confidence = total_weight / len(signals)
 
-    return round(weighted_score, 2), round(avg_confidence, 2)
+    return round(weighted_score, 2), round(avg_confidence, 2), signals
 
 def check_entry(netuid: int, current_score: float):
     if current_score < risk.ENTRY_SCORE_THRESHOLD:
@@ -113,13 +131,16 @@ async def _run_cycle():
         current_price = snapshot["alpha_price_tao"]
         store.update_peak_price(netuid, current_price)
 
-        score, confidence = score_subnet(netuid)
+        score, confidence, signals = score_subnet(netuid)
         store.insert_signals(ts, netuid, score, confidence)
+        store.insert_model_signals(ts, netuid, signals)
 
         should_exit, reason = check_exit(position, current_price, score )
 
         if should_exit:
             store.close_positions(netuid, ts, current_price, reason)
+            closed = store.get_position(netuid)
+            update_signal_weights(closed)
             logger.info(f"Exited position in SN{netuid} for reason: {reason}" + "at price" + f"{current_price:.2f}")
 
     for i, netuid in enumerate(netuids):
@@ -132,8 +153,9 @@ async def _run_cycle():
         if not snapshot or not snapshot.get("alpha_price_tao"):
             continue
         current_price = snapshot["alpha_price_tao"]
-        score, confidence = score_subnet(netuid)
+        score, confidence, signals = score_subnet(netuid)
         store.insert_signals(ts, netuid, score, confidence)
+        store.insert_model_signals(ts, netuid, signals)
 
         if deployed_tao / portfolio_value >= risk.MAX_TOTAL_DEPLOYED:
             break
@@ -170,3 +192,13 @@ def positions_summary() -> str:
     deployed = sum(p["size_tao"] for p in positions)
     lines.append(f"\nOpen: {len(positions)} positions | Deployed: {deployed:.1f} TAO")
     return "\n".join(lines)
+
+def update_signal_weights(position):
+    outcome = (position["exit_price"]-position["entry_price"])/position["entry_price"]
+    signals_at_entry = store.get_model_signals_at_time(position["netuid"], position["entry_ts"])
+    for s in signals_at_entry:
+        current_weight = store.get_signal_weight(s["model"])
+        new_weight = current_weight + 0.1*(outcome * s["score"])
+        new_weight = max(0.1, min(2.0, new_weight))
+        store.update_signal_weight(s["model"], new_weight)
+        
