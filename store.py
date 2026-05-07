@@ -521,9 +521,9 @@ def close_positions(netuid: int, exit_ts: int, exit_price: float, exit_reason: s
             cur.execute("""
                 UPDATE paper_positions
                 SET status = 'closed', exit_ts = %s, exit_price = %s, exit_reason = %s,
-                    pnl_tao = ROUND((exit_price - entry_price)/entry_price * size_tao, 6)
+                    pnl_tao = ROUND((%s - entry_price)/entry_price * size_tao, 6)
                 WHERE netuid = %s AND status = 'open'
-            """, (exit_ts, exit_price, exit_reason, netuid))
+            """, (exit_ts, exit_price, exit_reason, exit_price, netuid))
 def get_position(netuid: int) -> list[dict]:
     with get_conn() as conn:
         return _rows(conn, """
@@ -554,17 +554,17 @@ def insert_model_signals(ts, netuid, signals):
                     INSERT INTO model_signal_history (ts, netuid, model, score, confidence)
                     VALUES (%s, %s, %s, %s, %s)
                 """, (ts, netuid, s.model, s.score, s.confidence))
-def get_model_signals(netuid: int, days: int = 30) -> list[dict]:
+def get_model_signals_at_time(netuid: int, ts: int) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""SELECT DISTINCT ON (model) model, score, confidence FROM model_signal_history
                 WHERE netuid = %s AND ts <= %s ORDER BY model, ts DESC
             """, (netuid, ts))
-            return [{"model":r[0], "score": r[1], "confidence": r[2]} for r in cur.fetchall()]
-def get_signal_weights(model: str) -> float:
-    with get_conn(model) as conn:
+            return [{"model": r[0], "score": r[1], "confidence": r[2]} for r in cur.fetchall()]
+def get_signal_weight(model: str) -> float:
+    with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT model, weight FROM signal_weights WHERE model = %s")
+            cur.execute("SELECT weight FROM signal_weights WHERE model = %s", (model,))
             row = cur.fetchone()
             return row[0] if row else 1.0
 def update_signal_weight(model: str, weight: float):

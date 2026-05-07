@@ -138,9 +138,10 @@ async def _run_cycle():
         should_exit, reason = check_exit(position, current_price, score )
 
         if should_exit:
-            store.close_positions(netuid, ts, current_price, reason)
             closed = store.get_position(netuid)
-            update_signal_weights(closed)
+            store.close_positions(netuid, ts, current_price, reason)
+            if closed:
+                update_signal_weights(closed[0], current_price)
             logger.info(f"Exited position in SN{netuid} for reason: {reason}" + "at price" + f"{current_price:.2f}")
 
     for i, netuid in enumerate(netuids):
@@ -193,8 +194,8 @@ def positions_summary() -> str:
     lines.append(f"\nOpen: {len(positions)} positions | Deployed: {deployed:.1f} TAO")
     return "\n".join(lines)
 
-def update_signal_weights(position):
-    outcome = (position["exit_price"]-position["entry_price"])/position["entry_price"]
+def update_signal_weights(position, exit_price):
+    outcome = (exit_price - position["entry_price"]) / position["entry_price"]
     signals_at_entry = store.get_model_signals_at_time(position["netuid"], position["entry_ts"])
     for s in signals_at_entry:
         current_weight = store.get_signal_weight(s["model"])
