@@ -20,7 +20,7 @@ import memory as mem_store
 import memo as memo_gen
 import collector
 import fulfiller
-
+import trader 
 claude = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 reader = ChainReader()
 
@@ -285,3 +285,12 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+import trader
+                                                                                      
+position = {"entry_price": 0.001, "peak_price": 0.002}    
+
+print(trader.check_exit(position, 0.0016, 3))   # should be trailing stop
+print(trader.check_exit(position, 0.00084, 3))  # should be stop loss
+print(trader.check_exit(position, 0.001, -5))   # should be signal exit

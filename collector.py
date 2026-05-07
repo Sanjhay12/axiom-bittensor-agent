@@ -141,6 +141,9 @@ async def collect_once(reader):
             # Insert the fully merged snapshot once
             store.insert_subnet_snapshot(ts, netuid, subnet_data[netuid])
 
+            # Get prev UIDs before inserting current snapshots
+            prev_uids = store.get_latest_uids(netuid)
+
             if validators:
                 prev_stakes = store.get_latest_validator_stakes(netuid)
                 store.insert_validator_snapshots(ts, netuid, validators, prev_stakes)
@@ -158,9 +161,8 @@ async def collect_once(reader):
                     logger.warning(f"Collector: weights SN{netuid} failed: {e}")
 
             # Churn
-            all_uids  = {v["uid"] for v in validators} | {m["uid"] for m in all_miners_data}
-            prev_uids = store.get_latest_uids(netuid)
-            if prev_uids is not None:
+            all_uids = {v["uid"] for v in validators} | {m["uid"] for m in all_miners_data}
+            if prev_uids is not None and len(all_uids) > 0:
                 new_uids  = all_uids - prev_uids
                 lost_uids = prev_uids - all_uids
                 if new_uids or lost_uids:
@@ -198,7 +200,7 @@ async def collect_once(reader):
     # ── Network info ──────────────────────────────────────────────────────────
     try:
         net = await reader._call({"action": "network_info"}, timeout=90)
-        if "error" not in net:
+        if "error" not in net and any(net.get(k) is not None for k in ["block", "total_issuance_tao", "total_stake_tao"]):
             store.insert_network_snapshot(ts, net)
     except Exception as e:
         logger.error(f"Collector: network info failed: {e}")

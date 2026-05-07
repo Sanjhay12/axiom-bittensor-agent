@@ -430,6 +430,16 @@ def get_alpha_price_history(netuid: int, days: int = 30) -> list[dict]:
         """, (netuid, since))
 
 
+def get_active_netuids(days: int = 7) -> list[int]:
+    since = int(time.time()) - days * 86400
+    with get_conn() as conn:
+        rows = _rows(conn, """
+            SELECT DISTINCT netuid FROM subnet_snapshots
+            WHERE ts >= %s ORDER BY netuid ASC
+        """, (since,))
+    return [r["netuid"] for r in rows]
+
+
 # ── Bot memory ────────────────────────────────────────────────────────────────
 
 def load_memory() -> dict | None:
@@ -484,6 +494,58 @@ def get_relay_result(query_id: int) -> dict | None:
             SELECT input_text, result_text, received_at, fulfilled_at
             FROM relay_queries WHERE query_id = %s
         """, (query_id,))
+
+def insert_signals(ts: int, netuid:int, score:float, confidence:float):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO signal_history (ts, netuid, score, confidence)
+                VALUES (%s, %s, %s, %s)
+            """, (ts, netuid, score, confidence))
+def get_recent_signals(netuid: int, cycles: int = 2) -> list[dict]:
+    with get_conn() as conn:
+        return _rows(conn, """
+            SELECT ts, score, confidence FROM signal_history
+            WHERE netuid = %s ORDER BY ts DESC LIMIT %s
+        """, (netuid, cycles))
+def open_positions(ts: int, netuid: int, entry_price: float, size_tao: float) -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO paper_positions (entry_ts, netuid, entry_price, size_tao, peak_price)
+                VALUES (%s, %s, %s, %s, %s) RETURNING *
+            """, (ts, netuid, entry_price, size_tao, entry_price))
+def close_positions(netuid: int, exit_ts: int, exit_price: float, exit_reason: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE paper_positions
+                SET status = 'closed', exit_ts = %s, exit_price = %s, exit_reason = %s,
+                    pnl_tao = ROUND((exit_price - entry_price)/entry_price * size_tao, 6)
+                WHERE netuid = %s AND status = 'open'
+            """, (exit_ts, exit_price, exit_reason, netuid))
+def get_position(netuid: int) -> list[dict]:
+    with get_conn() as conn:
+        return _rows(conn, """
+            SELECT * FROM paper_positions
+            WHERE netuid = %s and status = 'open' ORDER BY entry_ts DESC
+        """, (netuid,))
+    
+def get_all_positions() -> list[dict]:
+    with get_conn() as conn:
+        return _rows(conn, """
+            SELECT * FROM paper_positions
+            WHERE status = 'open' ORDER BY entry_ts DESC
+        """)
+def update_peak_price(netuid: int, new_price: float):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE paper_positions
+                SET peak_price = GREATEST(peak_price, %s)
+                WHERE netuid = %s AND status = 'open'
+            """, (new_price, netuid))
+        
 
 
 # ── Subscriptions ─────────────────────────────────────────────────────────────
