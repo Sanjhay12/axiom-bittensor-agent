@@ -430,6 +430,17 @@ def get_alpha_price_history(netuid: int, days: int = 30) -> list[dict]:
         """, (netuid, since))
 
 
+def get_emission_coverage(netuids: list) -> dict:
+    with get_conn() as conn:
+        rows = _rows(conn, """
+            SELECT netuid, COUNT(total_emission_tao) as emission_count
+            FROM subnet_snapshots
+            WHERE netuid = ANY(%s)
+            GROUP BY netuid
+        """, (netuids,))
+    return {r["netuid"]: r["emission_count"] for r in rows}
+
+
 def get_active_netuids(days: int = 7) -> list[int]:
     since = int(time.time()) - days * 86400
     with get_conn() as conn:

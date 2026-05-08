@@ -120,7 +120,13 @@ async def collect_once(reader):
         logger.error(f"Collector: subnet overview failed: {e}")
 
     # ── Full metagraph for every active subnet ────────────────────────────────
-    for netuid in all_netuids:
+    coverage = store.get_emission_coverage(all_netuids)
+    prioritised = sorted(all_netuids, key=lambda n: coverage.get(n, 0))
+    deadline = time.time() + 3 * 3600
+    for netuid in prioritised:
+        if time.time() > deadline:
+            logger.warning(f"Collector: metagraph time budget exceeded, skipping remaining {len(all_netuids)} subnets")
+            break
         try:
             meta = await reader._call({"action": "metagraph", "netuid": netuid}, timeout=120)
             if "error" in meta:
