@@ -383,6 +383,16 @@ class ChainReader:
         text = await rd.bittensor_reddit_context()
         return _set(key, text) if text else ""
 
+    async def restart(self):
+        self._ready = False
+        if self._proc:
+            try:
+                self._proc.kill()
+            except Exception:
+                pass
+            self._proc = None
+        await self._ensure_proc()
+
     async def prewarm(self):
         logger.info("Prewarm: starting chain worker...")
         await self._ensure_proc()

@@ -102,6 +102,11 @@ async def collect_once(reader):
     subnet_data = {}  # accumulate all fields before inserting
     try:
         overview = await reader._call({"action": "all_subnets"}, timeout=120)
+        if "error" in overview or not overview.get("subnets"):
+            logger.warning(f"Collector: overview returned empty/error ({overview.get('error', 'no subnets')}), restarting chain worker and retrying...")
+            await reader.restart()
+            await asyncio.sleep(5)
+            overview = await reader._call({"action": "all_subnets"}, timeout=120)
         for s in overview.get("subnets", []):
             if "error" in s:
                 continue
