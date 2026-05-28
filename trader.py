@@ -68,7 +68,7 @@ def score_subnet(netuid):
         analytics.kalman_filter_price(netuid),
         analytics.registration_cost_velocity(netuid),
         analytics.isolation_forest_anomaly(netuid),
-        analytics.monte_carlo_emission(netuid)
+        # analytics.monte_carlo_emission(netuid)  -- noise, scores +3 on almost everything
     ]
 
     total_weight = sum(s.confidence*store.get_signal_weight(s.model) for s in signals if s.confidence>0)
