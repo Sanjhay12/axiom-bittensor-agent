@@ -446,22 +446,51 @@ def get_subnet_identity(sub, netuid: int) -> dict:
         return {"error": str(e)}
 
 
+def _substrate_tao(val) -> float:
+    if val is None:
+        raise ValueError("None")
+    v = val.value if hasattr(val, "value") else val
+    if hasattr(v, "tao"):
+        return float(v.tao)
+    return float(v) / 1e9  # raw rao → tao
+
+
 def get_network_info(sub) -> dict:
     result = {}
+
+    # Block
     try:
         result["block"] = sub.get_current_block()
-    except Exception as e:
-        logger.warning(f"network_info: get_current_block failed: {e}")
+    except Exception:
+        try:
+            result["block"] = sub.substrate.get_block_number(None)
+        except Exception as e:
+            logger.warning(f"network_info: block failed: {e}")
+
+    # Total issuance
     try:
         ti = sub.total_issuance()
         result["total_issuance_tao"] = float(ti.tao) if hasattr(ti, "tao") else float(ti)
-    except Exception as e:
-        logger.warning(f"network_info: total_issuance failed: {e}")
+    except Exception:
+        try:
+            result["total_issuance_tao"] = _substrate_tao(
+                sub.substrate.query("Balances", "TotalIssuance")
+            )
+        except Exception as e:
+            logger.warning(f"network_info: total_issuance failed: {e}")
+
+    # Total stake
     try:
         ts = sub.total_stake()
         result["total_stake_tao"] = float(ts.tao) if hasattr(ts, "tao") else float(ts)
-    except Exception as e:
-        logger.warning(f"network_info: total_stake failed: {e}")
+    except Exception:
+        try:
+            result["total_stake_tao"] = _substrate_tao(
+                sub.substrate.query("SubtensorModule", "TotalStake")
+            )
+        except Exception as e:
+            logger.warning(f"network_info: total_stake failed: {e}")
+
     logger.info(f"network_info result: {result}")
     return result
 
