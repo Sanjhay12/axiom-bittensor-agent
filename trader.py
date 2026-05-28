@@ -83,7 +83,7 @@ def check_entry(netuid: int, current_score: float):
     if current_score < risk.ENTRY_SCORE_THRESHOLD:
         return False
     recent = store.get_recent_signals(netuid, risk.ENTRY_CYCLES_REQUIRED)
-    if len(recent) < 2:
+    if len(recent) < risk.ENTRY_CYCLES_REQUIRED:
         return False
     return all(s["score"] > risk.ENTRY_SCORE_THRESHOLD for s in recent)
 
