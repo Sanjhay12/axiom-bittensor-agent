@@ -3,7 +3,7 @@ MAX_TOTAL_DEPLOYED = 0.80     # max 80% of portfolio deployed at once
 MAX_OPEN_POSITIONS = 10       # max number of concurrent positions                  
 MIN_TAO_BALANCE = 10.0        # always keep this much TAO free                      
    
-ENTRY_SCORE_THRESHOLD = 3.5    # min score to consider entry                         
+ENTRY_SCORE_THRESHOLD = 2.0    # min score to consider entry                         
 ENTRY_CYCLES_REQUIRED = 1   # consecutive cycles above threshold before entering
 EXIT_SCORE_THRESHOLD = -3    # exit immediately if score drops below this
 
