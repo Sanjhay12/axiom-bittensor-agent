@@ -17,4 +17,5 @@ NEW_SUBNET_MIN_DAYS = 7       # don't enter subnets with less than 7 days data
 PORTFOLIO_SIZE_TAO = 100.0    # paper trading starting balance
 
 MIN_HOLD_DAYS = 3                 # minimum holding period before considering exit
+MAX_HOLD_DAYS = 7                 # exit if position still open after 7 days
 EXIT_CYCLES_REQUIRED = 2              # consecutive cycles below threshold before exiting

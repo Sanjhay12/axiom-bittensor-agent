@@ -100,6 +100,9 @@ def check_exit(position: dict, current_price: float, current_score: float):
         return True, "trailing_stop"
     if current_score < risk.EXIT_SCORE_THRESHOLD:
         return True, "signal_exit"
+    days_held = (int(time.time()) - position["entry_ts"]) / 86400
+    if days_held >= risk.MAX_HOLD_DAYS:
+        return True, "time_exit"
     return False, ""
 
 async def run_loop():
