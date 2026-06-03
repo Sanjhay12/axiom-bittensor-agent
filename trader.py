@@ -5,6 +5,7 @@ import time
 import store
 import risk
 import analytics
+import random 
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +70,22 @@ def score_subnet(netuid):
         analytics.registration_cost_velocity(netuid),
         analytics.isolation_forest_anomaly(netuid),
         # analytics.monte_carlo_emission(netuid)  -- noise, scores +3 on almost everything
+   
     ]
 
-    total_weight = sum(s.confidence*store.get_signal_weight(s.model) for s in signals if s.confidence>0)
+    exploring = should_explore()
+    if exploring:
+        total_weight = sum(s.confidence for s in signals if s.confidence>0)
+    else:
+        total_weight = sum(s.confidence*store.get_signal_weight(s.model) for s in signals if s.confidence>0)
+
+    
     if total_weight == 0:
         return 0.0, 0.0, []
-    weighted_score = sum(s.score * s.confidence*store.get_signal_weight(s.model) for s in signals if s.confidence>0) / total_weight
+    if exploring:
+        weighted_score = sum(s.score * s.confidence for s in signals if s.confidence>0) / total_weight
+    else:
+        weighted_score = sum(s.score * s.confidence*store.get_signal_weight(s.model) for s in signals if s.confidence>0) / total_weight
     avg_confidence = total_weight / len(signals)
 
     return round(weighted_score, 2), round(avg_confidence, 2), signals
@@ -197,12 +208,60 @@ def positions_summary() -> str:
     lines.append(f"\nOpen: {len(positions)} positions | Deployed: {deployed:.1f} TAO")
     return "\n".join(lines)
 
+LEARNING_RATE = 0.15 
+WEIGHT_DECAY = 0.05 
+BASELINE_WINDOW = 10
+EXPLORATION_RATE = 0.10
+MIN_WEIGHT = 0.1
+MAX_WEIGHT = 2.0
+
+def _compute_reward(positon, exit_price):
+    pnl_pct = (exit_price - positon["entry_price"]) / positon["entry_price"]
+    days_held = (int(time.time()) - positon["entry_ts"]) / 86400
+    return pnl_pct / max(days_held, 1)
+def _compute_baseline():
+    closed = store.get_closed_positions(limit=BASELINE_WINDOW)
+    if not closed:
+        return 0.0
+    rewards = []
+    for p in closed:
+        if p.get("exit_price") and p.get("entry_price"):
+            pnl = (p["exit_price"] - p["entry_price"]) / p["entry_price"]
+            days = max((p.get("exit_ts", 0) - p.get("entry_ts", 0)) / 86400, 1)
+            rewards.append(pnl / days)
+    return sum(rewards) / len(rewards) if rewards else 0.0
+
 def update_signal_weights(position, exit_price):
-    outcome = (exit_price - position["entry_price"]) / position["entry_price"]
+    reward = _compute_reward(position, exit_price)
+    baseline = _compute_baseline()
+    advantage = reward - baseline 
+
     signals_at_entry = store.get_model_signals_at_time(position["netuid"], position["entry_ts"])
+    if not signals_at_entry:
+        return
+    total_weight = sum(
+          s["score"] * s["confidence"] * store.get_signal_weight(s["model"])
+          for s in signals_at_entry if s["confidence"] > 0
+      )
+    if total_weight == 0:
+        return
     for s in signals_at_entry:
+        if s["confidence"] <= 0:
+            continue
         current_weight = store.get_signal_weight(s["model"])
-        new_weight = current_weight + 0.1*(outcome * s["score"])
-        new_weight = max(0.1, min(2.0, new_weight))
+        contribution = (s["score"] * s["confidence"] * current_weight) / total_weight
+        new_weight = current_weight + LEARNING_RATE * advantage * contribution
+        new_weight = max(MIN_WEIGHT, min(MAX_WEIGHT, new_weight))
         store.update_signal_weight(s["model"], new_weight)
-        
+        logger.info(f"Updated weight for model {s['model']}: {current_weight:.2f} -> {new_weight:.2f} (reward: {reward:.4f}, baseline: {baseline:.4f})")
+
+
+def decay_signal_weights():
+    weights = store.get_all_signal_weights()
+    for model, weight in weights.items():
+        decayed = weight + WEIGHT_DECAY * (1.0 - weight)
+        decayed = max(MIN_WEIGHT, min(MAX_WEIGHT, decayed))
+        store.update_signal_weight(model, decayed)
+
+def should_explore():
+    return random.random() < EXPLORATION_RATE

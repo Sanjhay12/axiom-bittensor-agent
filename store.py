@@ -513,6 +513,13 @@ def insert_signals(ts: int, netuid:int, score:float, confidence:float):
                 INSERT INTO signal_history (ts, netuid, score, confidence)
                 VALUES (%s, %s, %s, %s)
             """, (ts, netuid, score, confidence))
+def get_recent_model_signals(netuid: int, model: str, cycles: int = 3) -> list[dict]:
+    with get_conn() as conn:
+        return _rows(conn, """
+            SELECT ts, model, score, confidence FROM model_signal_history
+            WHERE netuid = %s AND model = %s ORDER BY ts DESC LIMIT %s
+        """, (netuid, model, cycles))
+
 def get_recent_signals(netuid: int, cycles: int = 2) -> list[dict]:
     with get_conn() as conn:
         return _rows(conn, """
@@ -585,6 +592,22 @@ def update_signal_weight(model: str, weight: float):
                 INSERT INTO signal_weights (model, weight) VALUES (%s, %s)
                 ON CONFLICT (model) DO UPDATE SET weight = EXCLUDED.weight
             """, (model, weight))
+
+def get_all_signal_weights() -> dict:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT model, weight FROM signal_weights")
+            return {row[0]: row[1] for row in cur.fetchall()}
+
+def get_closed_positions(limit: int = 10) -> list[dict]:
+    with get_conn() as conn:
+        return _rows(conn, """
+            SELECT netuid, entry_ts, entry_price, exit_ts, exit_price, exit_reason, pnl_tao
+            FROM paper_positions
+            WHERE status != 'open' AND exit_price IS NOT NULL
+            ORDER BY exit_ts DESC
+            LIMIT %s
+        """, (limit,))
 
 # ── Subscriptions ─────────────────────────────────────────────────────────────
 
