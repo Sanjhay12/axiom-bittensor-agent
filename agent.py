@@ -252,7 +252,8 @@ async def _init_chain():
         asyncio.create_task(collector.run_loop(reader))
         asyncio.create_task(fulfiller.run_loop())
         asyncio.create_task(trader.run_loop())
-        logger.info("Collector, fulfiller and trader started.")
+        asyncio.create_task(trader.run_weekly_loop())
+        logger.info("Collector, fulfiller, trader and weekly tasks started.")
     except Exception as e:
         logger.error(f"Chain init failed: {e}")
 
@@ -276,6 +277,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("memo", memo))
     app.add_handler(CommandHandler("watchlist", watchlist))
+    app.add_handler(CommandHandler("positions", positions))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
     app.post_init = prewarm
     logger.info("Starting polling...")
@@ -287,10 +289,3 @@ if __name__ == "__main__":
     main()
 
 
-import trader
-                                                                                      
-position = {"entry_price": 0.001, "peak_price": 0.002}    
-
-print(trader.check_exit(position, 0.0016, 3))   # should be trailing stop
-print(trader.check_exit(position, 0.00084, 3))  # should be stop loss
-print(trader.check_exit(position, 0.001, -5))   # should be signal exit

@@ -126,6 +126,18 @@ async def run_loop():
             logger.error(f"Error in trader loop: {e}")
         await asyncio.sleep(14400)  # run every hour
 
+async def run_weekly_loop():
+    import audit
+    logger.info("Weekly task loop started...")
+    while True:
+        await asyncio.sleep(7 * 86400)
+        try:
+            logger.info("Running weekly decay and audit...")
+            decay_signal_weights()
+            audit.run_audit()
+        except Exception as e:
+            logger.error(f"Weekly tasks failed: {e}")
+
 async def _run_cycle():
     ts = int(time.time())
     netuids = store.get_active_netuids()
