@@ -65,6 +65,10 @@ Never pick or discuss a specific subnet unless you have live data for it in your
 Never make up subnet stats, neuron counts, registration costs, or any on-chain figures. If it's not in your context, it doesn't exist for this conversation.
 """
 
+TRADING_CONTEXT_PROMPT = """
+You also have live access to your owner's paper trading portfolio. Every message includes a fresh snapshot of all open positions with current price, P&L, drawdown from peak, trailing stop trigger, age, and recent exits. When asked about trades, positions, performance, or portfolio — use this data directly and confidently. Never say you don't have access to position or portfolio data.
+"""
+
 DISCLAIMER = "\n\nThis is for informational purposes only and does not constitute financial advice."
 
 
@@ -139,13 +143,17 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     plan = await _get_fetch_plan(text, recent)
     logger.info(f"Fetch plan: {plan}")
     chain_context = await gather_chain_context(text, reader, recent_history=recent, plan=plan)
-    system = SYSTEM_PROMPT
+    system = SYSTEM_PROMPT + TRADING_CONTEXT_PROMPT
     mem_context = mem_store.to_prompt(memory)
     if mem_context:
         system += f"\n\n---\n## What you know about this user\n{mem_context}\n---"
     if chain_context:
         system += f"\n\n---\n## Live On-Chain Data (use this for all numerical claims)\n{chain_context}\n---"
-    system += f"\n\n---\n## Your Live Trading Positions (fetched fresh right now)\n{trader.positions_context()}\n---"
+    try:
+        pos_context = trader.positions_context()
+        system += f"\n\n---\n## Live Trading Positions (fetched fresh right now)\n{pos_context}\n---"
+    except Exception as e:
+        logger.warning(f"positions_context failed: {e}")
     messages = list(history[chat_id]) + [{"role": "user", "content": text}]
 
     result = await claude.messages.create(
