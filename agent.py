@@ -218,8 +218,9 @@ def _subscription_required_msg() -> str:
 
 
 def _is_subscribed(telegram_id: int) -> bool:
-    import store
-    return store.get_telegram_subscription(telegram_id) is not None
+    return True
+    # import store
+    # return store.get_telegram_subscription(telegram_id) is not None
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
