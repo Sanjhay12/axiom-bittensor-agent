@@ -20,7 +20,8 @@ import memory as mem_store
 import memo as memo_gen
 import collector
 import fulfiller
-import trader 
+import trader
+import notify
 claude = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 reader = ChainReader()
 
@@ -130,6 +131,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_text(_subscription_required_msg())
         return
 
+    notify.set_chat_id(message.chat_id)
     await message.reply_chat_action("typing")
 
     chat_id = message.chat_id
@@ -223,8 +225,13 @@ def _is_subscribed(telegram_id: int) -> bool:
     # return store.get_telegram_subscription(telegram_id) is not None
 
 
+async def myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"Your chat ID is: {update.message.chat_id}")
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import store
+    notify.set_chat_id(update.message.chat_id)
     args = context.args
     if args:
         code = args[0]
@@ -254,6 +261,7 @@ async def _init_chain():
         asyncio.create_task(fulfiller.run_loop())
         asyncio.create_task(trader.run_loop())
         asyncio.create_task(trader.run_weekly_loop())
+        asyncio.create_task(trader.run_daily_summary_loop())
         logger.info("Collector, fulfiller, trader and weekly tasks started.")
     except Exception as e:
         logger.error(f"Chain init failed: {e}")
@@ -279,6 +287,7 @@ def main():
     app.add_handler(CommandHandler("memo", memo))
     app.add_handler(CommandHandler("watchlist", watchlist))
     app.add_handler(CommandHandler("positions", positions))
+    app.add_handler(CommandHandler("myid", myid))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
     app.post_init = prewarm
     logger.info("Starting polling...")

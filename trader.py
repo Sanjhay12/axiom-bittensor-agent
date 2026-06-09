@@ -5,7 +5,8 @@ import time
 import store
 import risk
 import analytics
-import random 
+import notify
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -170,14 +171,26 @@ async def _run_cycle():
         store.insert_signals(ts, netuid, score, confidence)
         store.insert_model_signals(ts, netuid, signals)
 
-        should_exit, reason = check_exit(position, current_price, score )
+        should_exit, reason = check_exit(position, current_price, score)
 
         if should_exit:
             closed = store.get_position(netuid)
             store.close_positions(netuid, ts, current_price, reason)
             if closed:
                 update_signal_weights(closed[0], current_price)
-            logger.info(f"Exited position in SN{netuid} for reason: {reason}" + "at price" + f"{current_price:.2f}")
+            pnl_pct = (current_price - position["entry_price"]) / position["entry_price"] * 100
+            logger.info(f"Exited SN{netuid} ({reason}) at {current_price:.4f}")
+            await notify.send(
+                f"Exited SN{netuid} — {reason}\n"
+                f"Entry: {position['entry_price']:.4f}  Exit: {current_price:.4f}  P&L: {pnl_pct:+.1f}%"
+            )
+        else:
+            trailing_trigger = position["peak_price"] * (1 - risk.TRAILING_STOP)
+            if current_price < trailing_trigger * 1.03 and current_price > trailing_trigger:
+                await notify.send(
+                    f"Warning SN{netuid} near trailing stop\n"
+                    f"Current: {current_price:.4f}  Trigger: {trailing_trigger:.4f}  Peak: {position['peak_price']:.4f}"
+                )
 
     for i, netuid in enumerate(netuids):
         logger.info(f"Scoring SN{netuid} ({i+1}/{len(netuids)})")
@@ -220,6 +233,9 @@ async def _run_cycle():
                 update_signal_weights(evict_pos[0], evict_price)
             open_netuids.pop(weakest)
             logger.info(f"Evicted SN{weakest} (score {weakest_score:.2f}) for SN{netuid} (score {score:.2f})")
+            await notify.send(
+                f"Replaced SN{weakest} (score {weakest_score:.2f}) with SN{netuid} (score {score:.2f})"
+            )
 
         score_range = max(5.0 - risk.ENTRY_SCORE_THRESHOLD, 0.01)
         scale = min((score - risk.ENTRY_SCORE_THRESHOLD) / score_range, 1.0)
@@ -232,9 +248,13 @@ async def _run_cycle():
             continue
 
         store.open_positions(ts, netuid, current_price, size_tao)
-        open_netuids[netuid] = {"netuid": netuid}
+        open_netuids[netuid] = {"netuid": netuid, "entry_price": current_price}
         deployed_tao += size_tao
         logger.info(f"Opened position in SN{netuid} with size {size_tao:.2f} TAO at price {current_price:.2f} with score {score} and confidence {confidence}")
+        await notify.send(
+            f"Entered SN{netuid} @ {current_price:.4f}\n"
+            f"Size: {size_tao:.1f} TAO  Score: {score:.2f}  Confidence: {confidence:.2f}"
+        )
 
 
 def positions_summary() -> str:
@@ -311,3 +331,54 @@ def decay_signal_weights():
 
 def should_explore():
     return random.random() < EXPLORATION_RATE
+
+
+async def run_daily_summary_loop():
+    from datetime import datetime, timezone, timedelta
+    logger.info("Daily summary loop started...")
+    while True:
+        now = datetime.now(timezone.utc)
+        tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        await asyncio.sleep((tomorrow - now).total_seconds())
+        try:
+            await _send_daily_summary()
+        except Exception as e:
+            logger.error(f"Daily summary failed: {e}")
+
+
+async def _send_daily_summary():
+    from datetime import datetime, timezone
+    today_start = int(datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+    date_str = datetime.now(timezone.utc).strftime("%b %d")
+
+    open_positions = store.get_all_positions()
+    closed_today = [p for p in store.get_closed_positions(limit=50) if (p.get("exit_ts") or 0) >= today_start]
+    entries_today = [p for p in open_positions if p["entry_ts"] >= today_start]
+
+    unrealized = 0.0
+    for p in open_positions:
+        snap = store.get_latest_subnet_snapshot(p["netuid"])
+        if snap and snap.get("alpha_price_tao"):
+            unrealized += (snap["alpha_price_tao"] - p["entry_price"]) / p["entry_price"] * p["size_tao"]
+
+    deployed = sum(p["size_tao"] for p in open_positions)
+    day_pnl = sum(p["pnl_tao"] or 0 for p in closed_today)
+
+    lines = [f"Daily Summary — {date_str}"]
+    lines.append(f"Open: {len(open_positions)} positions | {deployed:.0f} TAO deployed")
+    lines.append(f"Unrealized: {unrealized:+.2f} TAO")
+
+    if entries_today:
+        lines.append("\nEntered today:")
+        for p in entries_today:
+            lines.append(f"  SN{p['netuid']} @ {p['entry_price']:.4f}")
+
+    if closed_today:
+        lines.append("\nExited today:")
+        for p in closed_today:
+            lines.append(f"  SN{p['netuid']} {p['exit_reason']} | {p['pnl_tao']:+.4f} TAO")
+        lines.append(f"\nRealized today: {day_pnl:+.4f} TAO")
+    else:
+        lines.append("\nNo exits today.")
+
+    await notify.send("\n".join(lines))
