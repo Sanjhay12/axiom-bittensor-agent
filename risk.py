@@ -22,3 +22,4 @@ MAX_HOLD_DAYS = 7                 # exit if position still open after 7 days
 EXIT_CYCLES_REQUIRED = 2              # consecutive cycles below threshold before exiting
 TIME_EXIT_MIN_PNL = 0.05          # skip time exit if position is up more than this
 TIME_EXIT_MAX_DRAWDOWN = 0.05     # skip time exit if still within 5% of peak
+EVICT_MIN_PNL = 0.05              # don't evict a position that's up more than 5% even if signal is weak

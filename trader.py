@@ -183,8 +183,6 @@ async def _run_cycle():
         logger.info(f"Scoring SN{netuid} ({i+1}/{len(netuids)})")
         if netuid in open_netuids:
             continue
-        if len(open_netuids) >= risk.MAX_OPEN_POSITIONS:
-            break
         snapshot = store.get_latest_subnet_snapshot(netuid)
         if not snapshot or not snapshot.get("alpha_price_tao"):
             continue
@@ -198,18 +196,44 @@ async def _run_cycle():
 
         if not check_entry(netuid, score):
             continue
+
+        at_capacity = len(open_netuids) >= risk.MAX_OPEN_POSITIONS
+        if at_capacity:
+            weakest = min(open_netuids, key=lambda n: (store.get_recent_signals(n, 1) or [{"score": float("inf")}])[0]["score"])
+            weakest_score = (store.get_recent_signals(weakest, 1) or [{"score": float("inf")}])[0]["score"]
+            if score <= weakest_score:
+                continue
+            weakest_snap = store.get_latest_subnet_snapshot(weakest)
+            weakest_pnl = 0.0
+            if weakest_snap and weakest_snap.get("alpha_price_tao"):
+                weakest_entry = open_netuids[weakest]["entry_price"]
+                weakest_pnl = (weakest_snap["alpha_price_tao"] - weakest_entry) / weakest_entry
+            if weakest_pnl >= risk.EVICT_MIN_PNL:
+                continue
+            evict_snap = store.get_latest_subnet_snapshot(weakest)
+            if not evict_snap or not evict_snap.get("alpha_price_tao"):
+                continue
+            evict_price = evict_snap["alpha_price_tao"]
+            evict_pos = store.get_position(weakest)
+            store.close_positions(weakest, ts, evict_price, "replaced")
+            if evict_pos:
+                update_signal_weights(evict_pos[0], evict_price)
+            open_netuids.pop(weakest)
+            logger.info(f"Evicted SN{weakest} (score {weakest_score:.2f}) for SN{netuid} (score {score:.2f})")
+
         score_range = max(5.0 - risk.ENTRY_SCORE_THRESHOLD, 0.01)
         scale = min((score - risk.ENTRY_SCORE_THRESHOLD) / score_range, 1.0)
         size_tao = portfolio_value * (risk.MIN_POSITION_SIZE + (risk.MAX_POSITION_SIZE - risk.MIN_POSITION_SIZE) * scale)
 
         if deployed_tao + size_tao > portfolio_value * risk.MAX_TOTAL_DEPLOYED:
-            continue 
+            continue
 
-        if portfolio_value - deployed_tao-size_tao < risk.MIN_TAO_BALANCE:
+        if portfolio_value - deployed_tao - size_tao < risk.MIN_TAO_BALANCE:
             continue
 
         store.open_positions(ts, netuid, current_price, size_tao)
-        deployed_tao+= size_tao
+        open_netuids[netuid] = {"netuid": netuid}
+        deployed_tao += size_tao
         logger.info(f"Opened position in SN{netuid} with size {size_tao:.2f} TAO at price {current_price:.2f} with score {score} and confidence {confidence}")
 
 
