@@ -191,6 +191,12 @@ async def _run_cycle():
                     f"Warning SN{netuid} near trailing stop\n"
                     f"Current: {current_price:.4f}  Trigger: {trailing_trigger:.4f}  Peak: {position['peak_price']:.4f}"
                 )
+            pnl_pct = (current_price - position["entry_price"]) / position["entry_price"]
+            if pnl_pct >= risk.TAKE_PROFIT * 0.85:
+                await notify.send(
+                    f"SN{netuid} approaching take profit\n"
+                    f"P&L: {pnl_pct*100:+.1f}%  Target: {risk.TAKE_PROFIT*100:.0f}%  Current: {current_price:.4f}"
+                )
 
     for i, netuid in enumerate(netuids):
         logger.info(f"Scoring SN{netuid} ({i+1}/{len(netuids)})")
