@@ -1,5 +1,6 @@
-MAX_POSITION_SIZE = 0.10      # max 10% of portfolio per subnet                     
-MAX_TOTAL_DEPLOYED = 0.80     # max 80% of portfolio deployed at once               
+MAX_POSITION_SIZE = 0.10      # max 10% of portfolio per subnet
+MIN_POSITION_SIZE = 0.05      # min 5% of portfolio per subnet
+MAX_TOTAL_DEPLOYED = 0.80     # max 80% of portfolio deployed at once
 MAX_OPEN_POSITIONS = 10       # max number of concurrent positions                  
 MIN_TAO_BALANCE = 10.0        # always keep this much TAO free                      
    
@@ -19,3 +20,5 @@ PORTFOLIO_SIZE_TAO = 100.0    # paper trading starting balance
 MIN_HOLD_DAYS = 3                 # minimum holding period before considering exit
 MAX_HOLD_DAYS = 7                 # exit if position still open after 7 days
 EXIT_CYCLES_REQUIRED = 2              # consecutive cycles below threshold before exiting
+TIME_EXIT_MIN_PNL = 0.05          # skip time exit if position is up more than this
+TIME_EXIT_MAX_DRAWDOWN = 0.05     # skip time exit if still within 5% of peak

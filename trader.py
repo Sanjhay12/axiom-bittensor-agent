@@ -113,7 +113,8 @@ def check_exit(position: dict, current_price: float, current_score: float):
         return True, "signal_exit"
     days_held = (int(time.time()) - position["entry_ts"]) / 86400
     if days_held >= risk.MAX_HOLD_DAYS:
-        return True, "time_exit"
+        if pnl_pct < risk.TIME_EXIT_MIN_PNL and drawdown_from_peak <= -risk.TIME_EXIT_MAX_DRAWDOWN:
+            return True, "time_exit"
     return False, ""
 
 async def run_loop():
@@ -145,7 +146,15 @@ async def _run_cycle():
     open_netuids = {p["netuid"]: p for p in open_positions}
 
     deployed_tao = sum(p["size_tao"] for p in open_positions)
-    portfolio_value = risk.PORTFOLIO_SIZE_TAO
+
+    realized_pnl = sum(p["pnl_tao"] or 0 for p in store.get_closed_positions(limit=9999))
+    open_snaps = {p["netuid"]: store.get_latest_subnet_snapshot(p["netuid"]) for p in open_positions}
+    unrealized_pnl = sum(
+        (open_snaps[p["netuid"]]["alpha_price_tao"] - p["entry_price"]) / p["entry_price"] * p["size_tao"]
+        for p in open_positions
+        if open_snaps.get(p["netuid"]) and open_snaps[p["netuid"]].get("alpha_price_tao")
+    )
+    portfolio_value = risk.PORTFOLIO_SIZE_TAO + realized_pnl + unrealized_pnl
 
     logger.info(f"Cycle started — {len(netuids)} subnets, {len(open_positions)} open positions")
 
@@ -189,8 +198,9 @@ async def _run_cycle():
 
         if not check_entry(netuid, score):
             continue
-        size_tao = portfolio_value * (0.15 if score>=8 else 0.08)
-        size_tao = min(size_tao, portfolio_value * risk.MAX_POSITION_SIZE)
+        score_range = max(5.0 - risk.ENTRY_SCORE_THRESHOLD, 0.01)
+        scale = min((score - risk.ENTRY_SCORE_THRESHOLD) / score_range, 1.0)
+        size_tao = portfolio_value * (risk.MIN_POSITION_SIZE + (risk.MAX_POSITION_SIZE - risk.MIN_POSITION_SIZE) * scale)
 
         if deployed_tao + size_tao > portfolio_value * risk.MAX_TOTAL_DEPLOYED:
             continue 
