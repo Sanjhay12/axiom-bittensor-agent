@@ -229,6 +229,18 @@ async def myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Your chat ID is: {update.message.chat_id}")
 
 
+async def testnotify(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    notify.set_chat_id(update.message.chat_id)
+    await notify.send(
+        "Test — notifications are working\n"
+        "Entered SN99 @ 0.5000 | 8.0 TAO  Score: 3.21  Confidence: 0.74\n"
+        "Exited SN42 — trailing_stop\nEntry: 0.4000  Exit: 0.3600  P&L: -10.0%\n"
+        "Warning SN7 near trailing stop\nCurrent: 0.9100  Trigger: 0.9000  Peak: 1.0000\n"
+        "SN15 approaching take profit\nP&L: +17.2%  Target: 20%  Current: 1.1720"
+    )
+    await update.message.reply_text("Sent test notification.")
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import store
     notify.set_chat_id(update.message.chat_id)
@@ -288,6 +300,7 @@ def main():
     app.add_handler(CommandHandler("watchlist", watchlist))
     app.add_handler(CommandHandler("positions", positions))
     app.add_handler(CommandHandler("myid", myid))
+    app.add_handler(CommandHandler("testnotify", testnotify))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
     app.post_init = prewarm
     logger.info("Starting polling...")
