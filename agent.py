@@ -145,6 +145,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         system += f"\n\n---\n## What you know about this user\n{mem_context}\n---"
     if chain_context:
         system += f"\n\n---\n## Live On-Chain Data (use this for all numerical claims)\n{chain_context}\n---"
+    system += f"\n\n---\n## Your Live Trading Positions (fetched fresh right now)\n{trader.positions_context()}\n---"
     messages = list(history[chat_id]) + [{"role": "user", "content": text}]
 
     result = await claude.messages.create(

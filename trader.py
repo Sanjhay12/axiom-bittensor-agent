@@ -263,6 +263,49 @@ async def _run_cycle():
         )
 
 
+def positions_context() -> str:
+    open_positions = store.get_all_positions()
+    closed_recent = store.get_closed_positions(limit=10)
+
+    lines = []
+
+    if open_positions:
+        lines.append("OPEN POSITIONS:")
+        for p in open_positions:
+            snap = store.get_latest_subnet_snapshot(p["netuid"])
+            cur = snap["alpha_price_tao"] if snap and snap.get("alpha_price_tao") else None
+            age_h = (int(time.time()) - p["entry_ts"]) / 3600
+            if cur:
+                pnl_pct = (cur - p["entry_price"]) / p["entry_price"] * 100
+                drawdown = (cur - p["peak_price"]) / p["peak_price"] * 100
+                trailing_trigger = p["peak_price"] * (1 - risk.TRAILING_STOP)
+                lines.append(
+                    f"  SN{p['netuid']}: entry {p['entry_price']:.4f} | current {cur:.4f} | "
+                    f"P&L {pnl_pct:+.1f}% | peak {p['peak_price']:.4f} | "
+                    f"drawdown from peak {drawdown:+.1f}% | trailing stop trigger {trailing_trigger:.4f} | "
+                    f"age {age_h:.0f}h | size {p['size_tao']:.1f} TAO"
+                )
+            else:
+                lines.append(f"  SN{p['netuid']}: entry {p['entry_price']:.4f} | no current price | age {age_h:.0f}h")
+    else:
+        lines.append("OPEN POSITIONS: none")
+
+    deployed = sum(p["size_tao"] for p in open_positions)
+    realized = sum(p["pnl_tao"] or 0 for p in closed_recent)
+    lines.append(f"\nDeployed: {deployed:.1f} TAO across {len(open_positions)} positions")
+
+    if closed_recent:
+        lines.append("\nRECENT EXITS (last 10):")
+        for p in closed_recent:
+            lines.append(
+                f"  SN{p['netuid']}: {p['exit_reason']} | P&L {p['pnl_tao']:+.4f} TAO | "
+                f"entry {p['entry_price']:.4f} -> exit {p['exit_price']:.4f}"
+            )
+        lines.append(f"\nRealized P&L (last 10 exits): {realized:+.4f} TAO")
+
+    return "\n".join(lines)
+
+
 def positions_summary() -> str:
     positions = store.get_all_positions()
     if not positions:
