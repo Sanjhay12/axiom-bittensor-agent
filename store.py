@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 import os
 import secrets
@@ -539,7 +540,7 @@ def close_positions(netuid: int, exit_ts: int, exit_price: float, exit_reason: s
             cur.execute("""
                 UPDATE paper_positions
                 SET status = 'closed', exit_ts = %s, exit_price = %s, exit_reason = %s,
-                    pnl_tao = ROUND((%s - entry_price)/entry_price * size_tao, 6)
+                    pnl_tao = ROUND(CAST((%s - entry_price)/entry_price * size_tao AS NUMERIC), 6)
                 WHERE netuid = %s AND status = 'open'
             """, (exit_ts, exit_price, exit_reason, exit_price, netuid))
 def get_position(netuid: int) -> list[dict]:
