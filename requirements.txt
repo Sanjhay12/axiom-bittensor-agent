@@ -11,3 +11,4 @@ eth-account>=0.11.0
 scikit-learn>=1.4.0
 numpy>=1.26.0
 hmmlearn>=0.3.0
+tqdm>=4.0.0
