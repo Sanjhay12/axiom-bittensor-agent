@@ -1,11 +1,10 @@
 services:
   - type: web
     name: axiom-bittensor-agent
-    runtime: python
+    runtime: docker
+    dockerfilePath: ./Dockerfile
     region: oregon
     plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: python agent.py
     disk:
       name: axiom-data
       mountPath: /data
@@ -13,8 +12,6 @@ services:
     envVars:
       - key: DATA_DIR
         value: /data
-      - key: PYTHON_VERSION
-        value: 3.11.9
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: TELEGRAM_BOT_TOKEN
