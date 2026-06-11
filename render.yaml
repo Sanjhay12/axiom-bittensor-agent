@@ -14,7 +14,7 @@ services:
       - key: DATA_DIR
         value: /data
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: 3.11.9
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: TELEGRAM_BOT_TOKEN
