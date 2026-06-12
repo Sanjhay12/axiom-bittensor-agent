@@ -277,6 +277,7 @@ async def prewarm(app):
 async def _init_chain():
     logger.info("Starting chain worker in background...")
     try:
+        notify.load_chat_id()
         await reader.prewarm()
         asyncio.create_task(collector.run_loop(reader))
         asyncio.create_task(fulfiller.run_loop())

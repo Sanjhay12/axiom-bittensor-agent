@@ -157,6 +157,13 @@ def init_db():
             """)
 
             cur.execute("""
+                CREATE TABLE IF NOT EXISTS bot_config (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+            """)
+
+            cur.execute("""
                 CREATE TABLE IF NOT EXISTS relay_queries (
                     query_id     BIGINT PRIMARY KEY,
                     input_text   TEXT NOT NULL,
@@ -470,6 +477,24 @@ def save_memory(mem: dict):
                 INSERT INTO bot_memory (id, data) VALUES (1, %s)
                 ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data
             """, (json.dumps(mem),))
+
+
+def get_config(key: str) -> str | None:
+    try:
+        with get_conn() as conn:
+            row = _one(conn, "SELECT value FROM bot_config WHERE key = %s", (key,))
+            return row["value"] if row else None
+    except Exception:
+        return None
+
+
+def set_config(key: str, value: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO bot_config (key, value) VALUES (%s, %s)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+            """, (key, value))
 
 
 # ── Relay (on-chain query bridge) ─────────────────────────────────────────────

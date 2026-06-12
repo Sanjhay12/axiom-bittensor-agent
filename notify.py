@@ -10,6 +10,25 @@ _chat_id: str | None = None
 def set_chat_id(cid: int | str):
     global _chat_id
     _chat_id = str(cid)
+    try:
+        import store
+        store.set_config("telegram_chat_id", _chat_id)
+    except Exception as e:
+        logger.warning(f"Failed to persist chat_id: {e}")
+
+
+def load_chat_id():
+    """Restore the last known chat_id from the database (call on startup)."""
+    global _chat_id
+    if _chat_id:
+        return
+    try:
+        import store
+        cid = store.get_config("telegram_chat_id")
+        if cid:
+            _chat_id = cid
+    except Exception as e:
+        logger.warning(f"Failed to load chat_id: {e}")
 
 
 async def send(text: str):
