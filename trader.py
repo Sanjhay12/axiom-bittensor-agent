@@ -430,10 +430,10 @@ async def _send_daily_summary():
 
     if rows:
         rows.sort(key=lambda r: -r[4])
-        table = f"{'SN':<6}{'Size':>7}{'Entry':>9}{'Current':>9}{'P&L':>8}\n"
+        table = f"{'SN':<5}{'Entry':>7}{'Now':>7}{'P&L':>7}\n"
         for netuid, size, entry, price, pnl_pct in rows:
-            price_str = f"{price:.4f}" if price is not None else "—"
-            table += f"SN{netuid:<4}{size:>7.2f}{entry:>9.4f}{price_str:>9}{pnl_pct:>+7.1f}%\n"
+            price_str = f"{price:.3f}" if price is not None else "-"
+            table += f"SN{netuid:<3}{entry:>7.3f}{price_str:>7}{pnl_pct:>+6.1f}%\n"
         lines.append(f"\n<pre>{table}</pre>")
 
     if entries_today:
