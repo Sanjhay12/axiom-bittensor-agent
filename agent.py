@@ -238,6 +238,11 @@ async def myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Your chat ID is: {update.message.chat_id}")
 
 
+async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    notify.set_chat_id(update.message.chat_id)
+    await trader._send_daily_summary()
+
+
 async def testnotify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     notify.set_chat_id(update.message.chat_id)
     await notify.send(
@@ -310,6 +315,7 @@ def main():
     app.add_handler(CommandHandler("memo", memo))
     app.add_handler(CommandHandler("watchlist", watchlist))
     app.add_handler(CommandHandler("positions", positions))
+    app.add_handler(CommandHandler("summary", summary))
     app.add_handler(CommandHandler("myid", myid))
     app.add_handler(CommandHandler("testnotify", testnotify))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
