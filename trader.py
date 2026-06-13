@@ -180,22 +180,26 @@ async def _run_cycle():
                 update_signal_weights(closed[0], current_price)
             pnl_pct = (current_price - position["entry_price"]) / position["entry_price"] * 100
             logger.info(f"Exited SN{netuid} ({reason}) at {current_price:.4f}")
+            emoji = "🟢" if pnl_pct >= 0 else "🔴"
             await notify.send(
-                f"Exited SN{netuid} — {reason}\n"
-                f"Entry: {position['entry_price']:.4f}  Exit: {current_price:.4f}  P&L: {pnl_pct:+.1f}%"
+                f"{emoji} <b>Exited SN{netuid}</b> — {reason}\n"
+                f"Entry: {position['entry_price']:.4f}  Exit: {current_price:.4f}  P&L: <b>{pnl_pct:+.1f}%</b>",
+                parse_mode="HTML",
             )
         else:
             trailing_trigger = position["peak_price"] * (1 - risk.TRAILING_STOP)
             if current_price < trailing_trigger * 1.03 and current_price > trailing_trigger:
                 await notify.send(
-                    f"Warning SN{netuid} near trailing stop\n"
-                    f"Current: {current_price:.4f}  Trigger: {trailing_trigger:.4f}  Peak: {position['peak_price']:.4f}"
+                    f"⚠️ <b>SN{netuid}</b> near trailing stop\n"
+                    f"Current: {current_price:.4f}  Trigger: {trailing_trigger:.4f}  Peak: {position['peak_price']:.4f}",
+                    parse_mode="HTML",
                 )
             pnl_pct = (current_price - position["entry_price"]) / position["entry_price"]
             if pnl_pct >= risk.TAKE_PROFIT * 0.85:
                 await notify.send(
-                    f"SN{netuid} approaching take profit\n"
-                    f"P&L: {pnl_pct*100:+.1f}%  Target: {risk.TAKE_PROFIT*100:.0f}%  Current: {current_price:.4f}"
+                    f"🎯 <b>SN{netuid}</b> approaching take profit\n"
+                    f"P&L: {pnl_pct*100:+.1f}%  Target: {risk.TAKE_PROFIT*100:.0f}%  Current: {current_price:.4f}",
+                    parse_mode="HTML",
                 )
 
     for i, netuid in enumerate(netuids):
@@ -240,7 +244,8 @@ async def _run_cycle():
             open_netuids.pop(weakest)
             logger.info(f"Evicted SN{weakest} (score {weakest_score:.2f}) for SN{netuid} (score {score:.2f})")
             await notify.send(
-                f"Replaced SN{weakest} (score {weakest_score:.2f}) with SN{netuid} (score {score:.2f})"
+                f"🔄 Replaced <b>SN{weakest}</b> (score {weakest_score:.2f}) with <b>SN{netuid}</b> (score {score:.2f})",
+                parse_mode="HTML",
             )
 
         score_range = max(5.0 - risk.ENTRY_SCORE_THRESHOLD, 0.01)
@@ -258,8 +263,9 @@ async def _run_cycle():
         deployed_tao += size_tao
         logger.info(f"Opened position in SN{netuid} with size {size_tao:.2f} TAO at price {current_price:.2f} with score {score} and confidence {confidence}")
         await notify.send(
-            f"Entered SN{netuid} @ {current_price:.4f}\n"
-            f"Size: {size_tao:.1f} TAO  Score: {score:.2f}  Confidence: {confidence:.2f}"
+            f"🟢 <b>Entered SN{netuid}</b> @ {current_price:.4f}\n"
+            f"Size: {size_tao:.1f} TAO  Score: {score:.2f}  Confidence: {confidence:.2f}",
+            parse_mode="HTML",
         )
 
 
@@ -405,29 +411,42 @@ async def _send_daily_summary():
     entries_today = [p for p in open_positions if p["entry_ts"] >= today_start]
 
     unrealized = 0.0
+    rows = []
     for p in open_positions:
         snap = store.get_latest_subnet_snapshot(p["netuid"])
-        if snap and snap.get("alpha_price_tao"):
-            unrealized += (snap["alpha_price_tao"] - p["entry_price"]) / p["entry_price"] * p["size_tao"]
+        price = snap["alpha_price_tao"] if snap and snap.get("alpha_price_tao") else None
+        pnl_pct = 0.0
+        if price:
+            pnl_pct = (price - p["entry_price"]) / p["entry_price"] * 100
+            unrealized += pnl_pct / 100 * p["size_tao"]
+        rows.append((p["netuid"], p["size_tao"], p["entry_price"], price, pnl_pct))
 
     deployed = sum(p["size_tao"] for p in open_positions)
     day_pnl = sum(p["pnl_tao"] or 0 for p in closed_today)
 
-    lines = [f"Daily Summary — {date_str}"]
-    lines.append(f"Open: {len(open_positions)} positions | {deployed:.0f} TAO deployed")
-    lines.append(f"Unrealized: {unrealized:+.2f} TAO")
+    lines = [f"📊 <b>Daily Summary — {date_str}</b>", ""]
+    lines.append(f"Open: {len(open_positions)} positions | {deployed:.1f} TAO deployed")
+    lines.append(f"Unrealized: <b>{unrealized:+.2f} TAO</b>")
+
+    if rows:
+        rows.sort(key=lambda r: -r[4])
+        table = f"{'SN':<6}{'Size':>7}{'Entry':>9}{'Current':>9}{'P&L':>8}\n"
+        for netuid, size, entry, price, pnl_pct in rows:
+            price_str = f"{price:.4f}" if price is not None else "—"
+            table += f"SN{netuid:<4}{size:>7.2f}{entry:>9.4f}{price_str:>9}{pnl_pct:>+7.1f}%\n"
+        lines.append(f"\n<pre>{table}</pre>")
 
     if entries_today:
-        lines.append("\nEntered today:")
+        lines.append("<b>Entered today:</b>")
         for p in entries_today:
-            lines.append(f"  SN{p['netuid']} @ {p['entry_price']:.4f}")
+            lines.append(f"• SN{p['netuid']} @ {p['entry_price']:.4f}")
 
     if closed_today:
-        lines.append("\nExited today:")
+        lines.append("\n<b>Exited today:</b>")
         for p in closed_today:
-            lines.append(f"  SN{p['netuid']} {p['exit_reason']} | {p['pnl_tao']:+.4f} TAO")
-        lines.append(f"\nRealized today: {day_pnl:+.4f} TAO")
+            lines.append(f"• SN{p['netuid']} {p['exit_reason']} | {p['pnl_tao']:+.4f} TAO")
+        lines.append(f"\nRealized today: <b>{day_pnl:+.4f} TAO</b>")
     else:
         lines.append("\nNo exits today.")
 
-    await notify.send("\n".join(lines))
+    await notify.send("\n".join(lines), parse_mode="HTML")

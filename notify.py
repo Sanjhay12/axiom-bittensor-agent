@@ -31,17 +31,20 @@ def load_chat_id():
         logger.warning(f"Failed to load chat_id: {e}")
 
 
-async def send(text: str):
+async def send(text: str, parse_mode: str | None = None):
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     cid = _chat_id or os.getenv("OWNER_CHAT_ID")
     if not token or not cid:
         logger.warning("notify.send: no token or chat_id configured")
         return
+    payload = {"chat_id": cid, "text": text}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             await client.post(
                 f"https://api.telegram.org/bot{token}/sendMessage",
-                json={"chat_id": cid, "text": text},
+                json=payload,
             )
     except Exception as e:
         logger.warning(f"Telegram notify failed: {e}")

@@ -242,10 +242,11 @@ async def testnotify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     notify.set_chat_id(update.message.chat_id)
     await notify.send(
         "Test — notifications are working\n"
-        "Entered SN99 @ 0.5000 | 8.0 TAO  Score: 3.21  Confidence: 0.74\n"
-        "Exited SN42 — trailing_stop\nEntry: 0.4000  Exit: 0.3600  P&L: -10.0%\n"
-        "Warning SN7 near trailing stop\nCurrent: 0.9100  Trigger: 0.9000  Peak: 1.0000\n"
-        "SN15 approaching take profit\nP&L: +17.2%  Target: 20%  Current: 1.1720"
+        "🟢 <b>Entered SN99</b> @ 0.5000\nSize: 8.0 TAO  Score: 3.21  Confidence: 0.74\n"
+        "🔴 <b>Exited SN42</b> — trailing_stop\nEntry: 0.4000  Exit: 0.3600  P&L: <b>-10.0%</b>\n"
+        "⚠️ <b>SN7</b> near trailing stop\nCurrent: 0.9100  Trigger: 0.9000  Peak: 1.0000\n"
+        "🎯 <b>SN15</b> approaching take profit\nP&L: +17.2%  Target: 20%  Current: 1.1720",
+        parse_mode="HTML",
     )
     await update.message.reply_text("Sent test notification.")
 
