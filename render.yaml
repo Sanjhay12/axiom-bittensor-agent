@@ -22,3 +22,25 @@ services:
         sync: false
       - key: TWITTER_BEARER_TOKEN
         sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: CRM_IMAP_HOST
+        sync: false
+      - key: CRM_IMAP_USER
+        sync: false
+      - key: CRM_IMAP_PASSWORD
+        sync: false
+      - key: OWNER_EMAIL
+        sync: false
+      - key: CRM_SMTP_HOST
+        sync: false
+      - key: CRM_SMTP_USER
+        sync: false
+      - key: CRM_SMTP_PASSWORD
+        sync: false
+      - key: PROXYCURL_API_KEY
+        sync: false
+      - key: PERPLEXITY_API_KEY
+        sync: false
+      - key: CRUNCHBASE_API_KEY
+        sync: false

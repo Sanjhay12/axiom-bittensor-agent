@@ -22,6 +22,14 @@ import collector
 import fulfiller
 import trader
 import notify
+import crm_agent
+import crm_ask
+import crm_brief
+import crm_draft
+import crm_outbound
+import crm_radar
+import crm_score
+import crm_store
 claude = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 reader = ChainReader()
 
@@ -243,6 +251,100 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await trader._send_daily_summary()
 
 
+async def crm_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    notify.set_chat_id(update.message.chat_id)
+    await update.message.reply_text(crm_ask.pipeline_summary(), parse_mode="HTML")
+
+
+async def crm_radar_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    notify.set_chat_id(update.message.chat_id)
+    digest = crm_radar.build_digest()
+    await update.message.reply_text(digest or "Nothing to flag right now.", parse_mode="HTML")
+
+
+async def crm_ask_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    notify.set_chat_id(update.message.chat_id)
+    question = " ".join(context.args)
+    if not question:
+        await update.message.reply_text("Usage: /ask <question>")
+        return
+    answer = await crm_ask.answer(question)
+    await update.message.reply_text(answer)
+
+
+async def crm_whois(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = " ".join(context.args)
+    if not query:
+        await update.message.reply_text("Usage: /whois <email or name>")
+        return
+    person = crm_store.find_person(query)
+    if not person:
+        await update.message.reply_text(f"No contact matching '{query}'.")
+        return
+    text = (
+        f"<b>{person.get('name') or person['email']}</b>\n"
+        f"Firm: {person.get('firm_name') or 'unknown'}\n"
+        f"Stage: {person.get('stage')}\n"
+        f"Relationship: {person.get('relationship_type') or 'unknown'}\n"
+        f"Mandate: {person.get('mandate') or 'none noted'}\n"
+        f"Next step: {person.get('next_step') or 'none noted'}\n"
+        f"Notes: {person.get('notes') or 'none'}"
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+
+async def crm_score_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = " ".join(context.args)
+    if not query:
+        await update.message.reply_text("Usage: /score <email or name>")
+        return
+    result = crm_score.score_by_query(query)
+    if not result:
+        await update.message.reply_text(f"No contact matching '{query}'.")
+        return
+    breakdown = "\n".join(
+        f"  {k}: {v if v is not None else 'no data'}" for k, v in result["breakdown"].items()
+    )
+    text = (
+        f"<b>{result['name']} ({result.get('firm_name') or 'unknown firm'})</b>\n"
+        f"LP Score: {result['composite_score']}/100\n\n{breakdown}"
+    )
+    await update.message.reply_text(text, parse_mode="HTML")
+
+
+async def crm_brief_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = " ".join(context.args)
+    if not query:
+        await update.message.reply_text("Usage: /brief <email or name>")
+        return
+    await update.message.reply_text(await crm_brief.generate(query))
+
+
+async def crm_draft_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usage: /draft <email or name> <instruction>")
+        return
+    query, *rest = context.args
+    instruction = " ".join(rest) or "Write a friendly check-in follow-up."
+    await update.message.reply_text(await crm_draft.generate(query, instruction))
+
+
+async def crm_confirm_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = " ".join(context.args)
+    if not query:
+        await update.message.reply_text("Usage: /confirm <email or name>")
+        return
+    await update.message.reply_text(crm_ask.confirm_stage(query))
+
+
+async def crm_reject_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = " ".join(context.args)
+    if not query:
+        await update.message.reply_text("Usage: /reject <email or name>")
+        return
+    await update.message.reply_text(crm_ask.reject_stage(query))
+
+
 async def testnotify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     notify.set_chat_id(update.message.chat_id)
     await notify.send(
@@ -290,7 +392,10 @@ async def _init_chain():
         asyncio.create_task(trader.run_loop())
         asyncio.create_task(trader.run_weekly_loop())
         asyncio.create_task(trader.run_daily_summary_loop())
-        logger.info("Collector, fulfiller, trader and weekly tasks started.")
+        asyncio.create_task(crm_agent.run_loop())
+        asyncio.create_task(crm_radar.run_daily_loop())
+        asyncio.create_task(crm_outbound.run_daily_loop())
+        logger.info("Collector, fulfiller, trader, weekly and CRM agent tasks started.")
     except Exception as e:
         logger.error(f"Chain init failed: {e}")
 
@@ -318,6 +423,15 @@ def main():
     app.add_handler(CommandHandler("summary", summary))
     app.add_handler(CommandHandler("myid", myid))
     app.add_handler(CommandHandler("testnotify", testnotify))
+    app.add_handler(CommandHandler("pipeline", crm_pipeline))
+    app.add_handler(CommandHandler("radar", crm_radar_now))
+    app.add_handler(CommandHandler("ask", crm_ask_cmd))
+    app.add_handler(CommandHandler("whois", crm_whois))
+    app.add_handler(CommandHandler("score", crm_score_cmd))
+    app.add_handler(CommandHandler("brief", crm_brief_cmd))
+    app.add_handler(CommandHandler("draft", crm_draft_cmd))
+    app.add_handler(CommandHandler("confirm", crm_confirm_cmd))
+    app.add_handler(CommandHandler("reject", crm_reject_cmd))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
     app.post_init = prewarm
     logger.info("Starting polling...")
