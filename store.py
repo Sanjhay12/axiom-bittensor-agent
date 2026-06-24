@@ -625,6 +625,17 @@ def get_all_signal_weights() -> dict:
             cur.execute("SELECT model, weight FROM signal_weights")
             return {row[0]: row[1] for row in cur.fetchall()}
 
+def get_last_exit_ts(netuid: int) -> int | None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT MAX(exit_ts) FROM paper_positions WHERE netuid = %s AND exit_ts IS NOT NULL",
+                (netuid,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+
+
 def get_closed_positions(limit: int = 10) -> list[dict]:
     with get_conn() as conn:
         return _rows(conn, """

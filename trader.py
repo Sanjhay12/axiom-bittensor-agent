@@ -10,6 +10,8 @@ import random
 
 logger = logging.getLogger(__name__)
 
+CYCLE_INTERVAL_SECONDS = 14400  # how often run_loop ticks — used to convert COOLDOWN_CYCLES to wall-clock time
+
 
 def init_db():
     with store.get_conn() as conn:
@@ -94,6 +96,9 @@ def score_subnet(netuid):
 def check_entry(netuid: int, current_score: float):
     if current_score < risk.ENTRY_SCORE_THRESHOLD:
         return False
+    last_exit_ts = store.get_last_exit_ts(netuid)
+    if last_exit_ts and (time.time() - last_exit_ts) < risk.COOLDOWN_CYCLES * CYCLE_INTERVAL_SECONDS:
+        return False
     recent = store.get_recent_signals(netuid, risk.ENTRY_CYCLES_REQUIRED)
     if len(recent) < risk.ENTRY_CYCLES_REQUIRED:
         return False
@@ -126,7 +131,7 @@ async def run_loop():
             await _run_cycle()
         except Exception as e:
             logger.error(f"Error in trader loop: {e}")
-        await asyncio.sleep(14400)  # run every hour
+        await asyncio.sleep(CYCLE_INTERVAL_SECONDS)
 
 async def run_weekly_loop():
     import audit
