@@ -224,7 +224,10 @@ async def _run_cycle():
         if at_capacity:
             weakest = min(open_netuids, key=lambda n: (store.get_recent_signals(n, 1) or [{"score": float("inf")}])[0]["score"])
             weakest_score = (store.get_recent_signals(weakest, 1) or [{"score": float("inf")}])[0]["score"]
-            if score <= weakest_score:
+            if score <= weakest_score + risk.REPLACEMENT_MARGIN:
+                continue
+            weakest_days_held = (int(time.time()) - open_netuids[weakest]["entry_ts"]) / 86400
+            if weakest_days_held < risk.MIN_HOLD_DAYS:
                 continue
             weakest_snap = store.get_latest_subnet_snapshot(weakest)
             weakest_pnl = 0.0

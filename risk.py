@@ -12,6 +12,8 @@ STOP_LOSS = 0.15              # exit if position down 15%
 TAKE_PROFIT = 10.0            # effectively disabled (backtest-validated) — capping at 20% guaranteed missing moonshot-style winners
 TRAILING_STOP = 0.10          # trail by 10% from peak
 
+REPLACEMENT_MARGIN = 0.75     # new candidate must beat the weakest open position's score by this much to trigger a swap (avoids churning on score noise)
+
 COOLDOWN_CYCLES = 6           # cycles to wait before re-entering same subnet
 NEW_SUBNET_MIN_DAYS = 7       # don't enter subnets with less than 7 days data
 
