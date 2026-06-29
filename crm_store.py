@@ -71,6 +71,18 @@ def init_crm_db():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crm_interactions_person ON crm_interactions(person_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crm_interactions_ts ON crm_interactions(ts)")
 
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS crm_event_log (
+                    id         SERIAL PRIMARY KEY,
+                    ts         INTEGER NOT NULL,
+                    event_type TEXT NOT NULL,
+                    details    TEXT,
+                    created_at INTEGER NOT NULL
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_crm_event_log_ts ON crm_event_log(ts)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_crm_event_log_type ON crm_event_log(event_type)")
+
 
 def get_or_create_firm(name: str | None) -> int | None:
     """Case-insensitive exact match first, then substring match either direction
@@ -374,6 +386,22 @@ def set_enrichment(person_id: int, data: dict):
                 "UPDATE crm_people SET enrichment = %s, updated_at = %s WHERE id = %s",
                 (json.dumps(data), int(time.time()), person_id),
             )
+
+
+def log_event(event_type: str, details=None):
+    """Write a single row to crm_event_log. Never raises — logging failures are silent."""
+    now = int(time.time())
+    payload = json.dumps(details) if isinstance(details, dict) else (str(details) if details else None)
+    try:
+        with store.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO crm_event_log (ts, event_type, details, created_at) VALUES (%s, %s, %s, %s)",
+                    (now, event_type, payload, now),
+                )
+    except Exception as e:
+        import logging as _log
+        _log.getLogger(__name__).warning(f"crm_store: failed to log event {event_type}: {e}")
 
 
 def create_lead(name: str | None, firm_name: str | None, notes: str, source: str = "outbound_discovery") -> int:

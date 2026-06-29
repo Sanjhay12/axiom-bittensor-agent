@@ -45,8 +45,12 @@ def send(subject: str, body_html: str, in_reply_to: str | None = None):
             server.starttls()
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.sendmail(SMTP_USER, [OWNER_EMAIL], msg.as_string())
+        import crm_store
+        crm_store.log_event("reply_sent", {"to": OWNER_EMAIL, "subject": subject})
     except Exception as e:
         logger.error(f"crm_mail: send failed: {e}")
+        import crm_store
+        crm_store.log_event("reply_failed", {"subject": subject, "error": str(e)})
 
 
 async def send_async(subject: str, body_html: str, in_reply_to: str | None = None):

@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import traceback
 
 import crm_ask
 import crm_brief
@@ -166,6 +167,11 @@ async def _reply_to_note(msg: dict, note: str):
             reply = await crm_ask.answer(note)
     except Exception as e:
         logger.error(f"crm_agent: failed to answer direct note: {e}")
+        crm_store.log_event("error", {
+            "module": "crm_agent._reply_to_note",
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+        })
         reply = "Got your note but hit an error processing it. Logged for now."
 
     subject = f"Re: {msg.get('subject') or 'your note'}"
@@ -203,19 +209,32 @@ async def _handle_attachments(msg: dict) -> bool:
 
 async def process_once():
     messages = crm_mailbox.fetch_new_messages()
+    crm_store.log_event("poll_complete", {"message_count": len(messages)})
     for msg in messages:
+        crm_store.log_event("email_received", {
+            "from": msg.get("from"),
+            "subject": msg.get("subject"),
+            "message_id": msg.get("message_id"),
+        })
+
         if await _handle_attachments(msg):
             continue
 
         extracted = await crm_parser.extract(msg)
         if extracted.get("skip"):
+            crm_store.log_event("email_skipped", {"from": msg.get("from"), "subject": msg.get("subject")})
             continue
 
         if extracted.get("intent") == "direct_note":
             note = extracted.get("note_content") or msg.get("body", "")
             logger.info(f"crm_agent: direct note received: {note[:200]}")
+            crm_store.log_event("direct_note", {"from": msg.get("from"), "note": note[:300]})
             await _reply_to_note(msg, note)
             continue
+
+        if extracted.get("intent") == "call_note":
+            extracted["direction"] = "outbound"
+            logger.info(f"crm_agent: call note — {extracted.get('person_name')} ({extracted.get('firm_name')})")
 
         firm_id = crm_store.get_or_create_firm(extracted.get("firm_name"))
         person_id, is_new_person = crm_store.upsert_person(extracted, firm_id, msg["ts"])
@@ -231,6 +250,13 @@ async def process_once():
             f"crm_agent: recorded interaction with {extracted.get('person_name') or extracted.get('person_email')} "
             f"(importance={extracted.get('importance')})"
         )
+        crm_store.log_event("interaction_recorded", {
+            "person": extracted.get("person_name") or extracted.get("person_email"),
+            "firm": extracted.get("firm_name"),
+            "importance": extracted.get("importance"),
+            "is_new_person": is_new_person,
+            "stage": extracted.get("stage"),
+        })
 
         if (extracted.get("importance") or 0) >= HIGH_IMPORTANCE_THRESHOLD:
             name = extracted.get("person_name") or extracted.get("person_email") or "Unknown"
@@ -260,8 +286,14 @@ async def run_loop():
     crm_store.init_crm_db()
     logger.info(f"crm_agent: starting poll loop every {POLL_INTERVAL}s")
     while True:
+        crm_store.log_event("poll_start")
         try:
             await process_once()
         except Exception as e:
             logger.error(f"crm_agent: loop error: {e}")
+            crm_store.log_event("error", {
+                "module": "crm_agent.run_loop",
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+            })
         await asyncio.sleep(POLL_INTERVAL)
