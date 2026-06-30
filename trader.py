@@ -113,14 +113,13 @@ def check_exit(position: dict, current_price: float, current_score: float):
     if pnl_pct >= risk.TAKE_PROFIT:
         return True, "take_profit"
     drawdown_from_peak = (current_price - peak_price) / peak_price
-    if drawdown_from_peak <= -risk.TRAILING_STOP:
+    if pnl_pct >= risk.TRAILING_STOP_ACTIVATE and drawdown_from_peak <= -risk.TRAILING_STOP:
         return True, "trailing_stop"
     if current_score < risk.EXIT_SCORE_THRESHOLD:
         return True, "signal_exit"
     days_held = (int(time.time()) - position["entry_ts"]) / 86400
-    if days_held >= risk.MAX_HOLD_DAYS:
-        if pnl_pct < risk.TIME_EXIT_MIN_PNL and drawdown_from_peak <= -risk.TIME_EXIT_MAX_DRAWDOWN:
-            return True, "time_exit"
+    if days_held >= risk.MAX_HOLD_DAYS and pnl_pct < risk.TIME_EXIT_MIN_PNL:
+        return True, "time_exit"
     return False, ""
 
 async def run_loop():
