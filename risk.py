@@ -6,12 +6,12 @@ MIN_TAO_BALANCE = 10.0        # always keep this much TAO free
    
 ENTRY_SCORE_THRESHOLD = 5.0    # min score to consider entry (backtest-validated; raised back from 2.0 — the lowered threshold let in low-conviction entries that mostly got trailing-stopped out)
 ENTRY_CYCLES_REQUIRED = 1   # consecutive cycles above threshold before entering
-EXIT_SCORE_THRESHOLD = -3    # exit immediately if score drops below this
+EXIT_SCORE_THRESHOLD = -1.0  # exit when score weakens meaningfully (raised from -3 — signal exits average +0.15 TAO)
 
 STOP_LOSS = 0.15              # exit if position down 15% from entry
 TAKE_PROFIT = 10.0            # effectively disabled — let winners run
-TRAILING_STOP = 0.15          # trail by 15% from peak (widened from 10% — subnet prices move 10%+ in normal noise)
-TRAILING_STOP_ACTIVATE = 0.05 # only start trailing once position is up 5% — before that, only stop_loss catches downside
+TRAILING_STOP = 0.10          # trail by 10% from peak (tightened from 15% — wide stop was producing 7-13% losses)
+TRAILING_STOP_ACTIVATE = 0.03 # arm trailing stop once position is up 3% (lowered from 5%)
 
 REPLACEMENT_MARGIN = 1.5      # new candidate must beat weakest position's score by this much (raised from 0.75 to reduce churn)
 

@@ -112,8 +112,9 @@ def check_exit(position: dict, current_price: float, current_score: float):
         return True, "stop_loss"
     if pnl_pct >= risk.TAKE_PROFIT:
         return True, "take_profit"
+    peak_pnl = (peak_price - entry_price) / entry_price
     drawdown_from_peak = (current_price - peak_price) / peak_price
-    if pnl_pct >= risk.TRAILING_STOP_ACTIVATE and drawdown_from_peak <= -risk.TRAILING_STOP:
+    if peak_pnl >= risk.TRAILING_STOP_ACTIVATE and drawdown_from_peak <= -risk.TRAILING_STOP:
         return True, "trailing_stop"
     if current_score < risk.EXIT_SCORE_THRESHOLD:
         return True, "signal_exit"
