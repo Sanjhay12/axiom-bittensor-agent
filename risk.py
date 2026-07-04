@@ -4,7 +4,7 @@ MAX_TOTAL_DEPLOYED = 0.80     # max 80% of portfolio deployed at once
 MAX_OPEN_POSITIONS = 10       # max number of concurrent positions                  
 MIN_TAO_BALANCE = 10.0        # always keep this much TAO free                      
    
-ENTRY_SCORE_THRESHOLD = 5.0    # min score to consider entry (backtest-validated; raised back from 2.0 — the lowered threshold let in low-conviction entries that mostly got trailing-stopped out)
+ENTRY_SCORE_THRESHOLD = 3.0    # live scores top out ~4.0 (avg top 2.5), so backtest's 5.0 blocked ALL entries; 3.0 = top ~19% of live cycles / ~8 subnets/wk — selective without the churn 2.0 caused
 ENTRY_CYCLES_REQUIRED = 1   # consecutive cycles above threshold before entering
 EXIT_SCORE_THRESHOLD = -1.0  # exit when score weakens meaningfully (raised from -3 — signal exits average +0.15 TAO)
 
