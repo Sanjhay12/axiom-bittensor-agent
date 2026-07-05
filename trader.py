@@ -93,8 +93,15 @@ def score_subnet(netuid):
 
     return round(weighted_score, 2), round(avg_confidence, 2), signals
 
-def check_entry(netuid: int, current_score: float):
-    if current_score < risk.ENTRY_SCORE_THRESHOLD:
+def entry_threshold() -> float:
+    """Rolling entry bar: a percentile of recent scores, floored. Adapts as the score scale drifts."""
+    pctl = store.get_score_percentile(risk.ENTRY_PERCENTILE, risk.ENTRY_LOOKBACK_DAYS)
+    if pctl is None:
+        pctl = risk.ENTRY_SCORE_THRESHOLD
+    return max(pctl, risk.ENTRY_SCORE_FLOOR)
+
+def check_entry(netuid: int, current_score: float, threshold: float):
+    if current_score < threshold:
         return False
     last_exit_ts = store.get_last_exit_ts(netuid)
     if last_exit_ts and (time.time() - last_exit_ts) < risk.COOLDOWN_CYCLES * CYCLE_INTERVAL_SECONDS:
@@ -102,7 +109,7 @@ def check_entry(netuid: int, current_score: float):
     recent = store.get_recent_signals(netuid, risk.ENTRY_CYCLES_REQUIRED)
     if len(recent) < risk.ENTRY_CYCLES_REQUIRED:
         return False
-    return all(s["score"] > risk.ENTRY_SCORE_THRESHOLD for s in recent)
+    return all(s["score"] > threshold for s in recent)
 
 def check_exit(position: dict, current_price: float, current_score: float):
     entry_price = position["entry_price"]
@@ -116,6 +123,10 @@ def check_exit(position: dict, current_price: float, current_score: float):
     drawdown_from_peak = (current_price - peak_price) / peak_price
     if peak_pnl >= risk.TRAILING_STOP_ACTIVATE and drawdown_from_peak <= -risk.TRAILING_STOP:
         return True, "trailing_stop"
+    # breakeven ratchet: once a position has run up past BREAKEVEN_ACTIVATE, never let it
+    # round-trip below entry — catches the reversal band beneath the trailing-stop arm point
+    if peak_pnl >= risk.BREAKEVEN_ACTIVATE and pnl_pct <= risk.BREAKEVEN_FLOOR:
+        return True, "breakeven_stop"
     if current_score < risk.EXIT_SCORE_THRESHOLD:
         return True, "signal_exit"
     days_held = (int(time.time()) - position["entry_ts"]) / 86400
@@ -207,6 +218,10 @@ async def _run_cycle():
                     parse_mode="HTML",
                 )
 
+    # Score every non-open subnet first, then act on the strongest candidates by score.
+    # (Ranking matters now that the entry bar is a percentile — we want the best names, not
+    # whichever ones happen to come first in netuid order.)
+    candidates = []
     for i, netuid in enumerate(netuids):
         logger.info(f"Scoring SN{netuid} ({i+1}/{len(netuids)})")
         if netuid in open_netuids:
@@ -218,11 +233,17 @@ async def _run_cycle():
         score, confidence, signals = score_subnet(netuid)
         store.insert_signals(ts, netuid, score, confidence)
         store.insert_model_signals(ts, netuid, signals)
+        candidates.append((score, confidence, netuid, current_price))
 
+    threshold = entry_threshold()
+    logger.info(f"Rolling entry threshold = {threshold:.2f} (p{int(risk.ENTRY_PERCENTILE*100)} of {risk.ENTRY_LOOKBACK_DAYS}d, floor {risk.ENTRY_SCORE_FLOOR})")
+
+    candidates.sort(key=lambda c: c[0], reverse=True)
+    for score, confidence, netuid, current_price in candidates:
         if deployed_tao / portfolio_value >= risk.MAX_TOTAL_DEPLOYED:
             break
 
-        if not check_entry(netuid, score):
+        if not check_entry(netuid, score, threshold):
             continue
 
         at_capacity = len(open_netuids) >= risk.MAX_OPEN_POSITIONS
@@ -256,8 +277,8 @@ async def _run_cycle():
                 parse_mode="HTML",
             )
 
-        score_range = max(5.0 - risk.ENTRY_SCORE_THRESHOLD, 0.01)
-        scale = min((score - risk.ENTRY_SCORE_THRESHOLD) / score_range, 1.0)
+        score_range = max(5.0 - threshold, 0.01)
+        scale = min((score - threshold) / score_range, 1.0)
         size_tao = portfolio_value * (risk.MIN_POSITION_SIZE + (risk.MAX_POSITION_SIZE - risk.MIN_POSITION_SIZE) * scale)
 
         if deployed_tao + size_tao > portfolio_value * risk.MAX_TOTAL_DEPLOYED:

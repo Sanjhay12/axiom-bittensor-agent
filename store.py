@@ -15,8 +15,12 @@ _pool: psycopg2.pool.ThreadedConnectionPool | None = None
 def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
     global _pool
     if _pool is None:
+        # Max bumped from 5: a bulk contact import schedules one concurrent
+        # crm_enrich.enrich_person() task per new contact via asyncio.create_task,
+        # each needing its own connection — a large import could burst well past 5
+        # and hit PoolError (which isn't caught, so it'd break that enrichment run).
         _pool = psycopg2.pool.ThreadedConnectionPool(
-            1, 5, dsn=os.environ["DATABASE_URL"]
+            1, 20, dsn=os.environ["DATABASE_URL"]
         )
     return _pool
 
@@ -552,6 +556,16 @@ def get_recent_signals(netuid: int, cycles: int = 2) -> list[dict]:
             SELECT ts, score, confidence FROM signal_history
             WHERE netuid = %s ORDER BY ts DESC LIMIT %s
         """, (netuid, cycles))
+
+def get_score_percentile(pct: float, days: int) -> float | None:
+    """Rolling percentile of recent cross-sectional scores — the adaptive entry bar."""
+    since = int(time.time()) - days * 86400
+    with get_conn() as conn:
+        row = _one(conn, """
+            SELECT percentile_cont(%s) WITHIN GROUP (ORDER BY score) AS p
+            FROM signal_history WHERE ts >= %s
+        """, (pct, since))
+    return row["p"] if row and row["p"] is not None else None
 def open_positions(ts: int, netuid: int, entry_price: float, size_tao: float) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
