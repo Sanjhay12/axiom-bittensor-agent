@@ -16,7 +16,10 @@ from email.utils import make_msgid
 
 logger = logging.getLogger(__name__)
 
-SMTP_HOST = os.getenv("CRM_SMTP_HOST") or os.getenv("CRM_IMAP_HOST")
+# Derive the SMTP host from the IMAP host (imap.gmail.com -> smtp.gmail.com) so sending
+# works off the existing CRM_IMAP_* vars — no separate CRM_SMTP_HOST needed. The IMAP host
+# can't send mail, which is what caused the "[Errno 101] Network is unreachable" send failures.
+SMTP_HOST = os.getenv("CRM_SMTP_HOST") or (os.getenv("CRM_IMAP_HOST") or "").replace("imap.", "smtp.")
 SMTP_PORT = int(os.getenv("CRM_SMTP_PORT", 587))
 SMTP_USER = os.getenv("CRM_SMTP_USER") or os.getenv("CRM_IMAP_USER")
 SMTP_PASSWORD = os.getenv("CRM_SMTP_PASSWORD") or os.getenv("CRM_IMAP_PASSWORD")
