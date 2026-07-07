@@ -188,12 +188,58 @@ def init_crm_db():
                 )
             """)
 
+            # Level 2 "config": bounded, typed knobs the owner sets by email (digest hour,
+            # cold/stale thresholds, digest recipients). Code reads these with a default fallback.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS crm_config (
+                    key         TEXT PRIMARY KEY,
+                    value       TEXT NOT NULL,
+                    updated_by  TEXT,
+                    updated_at  INTEGER NOT NULL
+                )
+            """)
+
             # Bulk imports do a name/firm lookup per row — these keep get_or_create_firm
             # and the duplicate/name-conflict checks from degrading to full table scans
             # as the tables grow (was O(rows x table size) before these existed).
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crm_firms_name_lower ON crm_firms (LOWER(name))")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crm_firms_name_lower_pattern ON crm_firms (LOWER(name) text_pattern_ops)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crm_people_name_lower ON crm_people (LOWER(name))")
+
+
+# ── Config (Level 2: owner sets bounded knobs by email) ──────────────────────
+
+def set_config(key: str, value, updated_by: str | None = None):
+    with store.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO crm_config (key, value, updated_by, updated_at) VALUES (%s,%s,%s,%s)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value,
+                    updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at
+            """, (key, str(value), updated_by, int(time.time())))
+
+
+def get_config(key: str, default: str | None = None) -> str | None:
+    with store.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT value FROM crm_config WHERE key = %s", (key,))
+            row = cur.fetchone()
+            return row[0] if row else default
+
+
+def get_config_int(key: str, default: int) -> int:
+    v = get_config(key)
+    try:
+        return int(v) if v is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
+def get_all_config() -> dict:
+    with store.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT key, value FROM crm_config ORDER BY key")
+            return {k: v for k, v in cur.fetchall()}
 
 
 # ── Directives (Level 1: owner steers agent behaviour by email) ──────────────

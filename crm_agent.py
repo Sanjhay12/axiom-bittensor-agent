@@ -17,6 +17,7 @@ from email.utils import parseaddr
 
 import crm_ask
 import crm_brief
+import crm_config
 import crm_dashboard
 import crm_directives
 import crm_docs
@@ -504,6 +505,8 @@ async def _reply_to_note(msg: dict, note: str):
                     await _send_brief(msg, action["contact"], action.get("product"))
                     return
                 reply = await _dispatch_action(action)
+        if reply is None:
+            reply = await crm_config.try_config_command(note, from_owner)
         if reply is None:
             reply = await crm_directives.try_directive_command(note, from_owner)
         if reply is None:

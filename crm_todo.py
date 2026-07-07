@@ -83,6 +83,10 @@ def _amt(row) -> str:
 
 
 def _gather(now: int) -> dict:
+    cold_days = crm_store.get_config_int("cold_days", COLD_DAYS)
+    stale_opp_days = crm_store.get_config_int("stale_opp_days", STALE_OPP_DAYS)
+    reply_overdue_days = crm_store.get_config_int("reply_overdue_days", REPLY_OVERDUE_DAYS)
+    follow_up_overdue_days = crm_store.get_config_int("follow_up_overdue_days", FOLLOW_UP_OVERDUE_DAYS)
     with store.get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
 
@@ -97,7 +101,7 @@ def _gather(now: int) -> dict:
                 ORDER BY p.importance DESC NULLS LAST, p.deal_amount_usd DESC NULLS LAST,
                          p.last_touch_ts ASC NULLS FIRST
                 LIMIT 15
-            """, (now - FOLLOW_UP_OVERDUE_DAYS * DAY,))
+            """, (now - follow_up_overdue_days * DAY,))
             overdue = list(cur.fetchall())
 
             # 2. Unanswered inbound: last email from them, no reply in 3+ days
@@ -114,7 +118,7 @@ def _gather(now: int) -> dict:
                   AND p.stage NOT IN ('Committed','Passed','Dormant')
                 ORDER BY i.ts ASC
                 LIMIT 10
-            """, (now - REPLY_OVERDUE_DAYS * DAY, now - 30 * DAY))
+            """, (now - reply_overdue_days * DAY, now - 30 * DAY))
             unanswered = list(cur.fetchall())
 
             # 3. Promised items: next_step says to send something
@@ -142,7 +146,7 @@ def _gather(now: int) -> dict:
                 ORDER BY p.importance DESC NULLS LAST, p.deal_amount_usd DESC NULLS LAST,
                          p.last_touch_ts ASC NULLS FIRST
                 LIMIT 15
-            """, (now - COLD_DAYS * DAY,))
+            """, (now - cold_days * DAY,))
             cold = list(cur.fetchall())
 
             # 5. High-value, no next step
@@ -166,7 +170,7 @@ def _gather(now: int) -> dict:
                 WHERE p.stage = 'Materials sent'
                   AND (p.last_touch_ts IS NULL OR p.last_touch_ts < %s)
                 ORDER BY p.deal_amount_usd DESC NULLS LAST, p.last_touch_ts ASC NULLS FIRST
-            """, (now - FOLLOW_UP_OVERDUE_DAYS * DAY,))
+            """, (now - follow_up_overdue_days * DAY,))
             materials_no_follow = list(cur.fetchall())
 
             # 7. Stale opportunities
@@ -180,7 +184,7 @@ def _gather(now: int) -> dict:
                   AND o.updated_at < %s
                 ORDER BY o.deal_amount_usd DESC NULLS LAST
                 LIMIT 10
-            """, (now - STALE_OPP_DAYS * DAY,))
+            """, (now - stale_opp_days * DAY,))
             stale_opps = list(cur.fetchall())
 
             # 8. Revisit-later prospects

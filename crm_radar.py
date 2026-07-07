@@ -171,17 +171,24 @@ def build_digest() -> str | None:
 
 async def send_digest():
     digest = build_digest()
-    if digest:
-        await crm_mail.send_async(f"Follow-Up Radar — {datetime.now(timezone.utc).strftime('%b %d')}", digest)
-    else:
+    if not digest:
         logger.info("crm_radar: nothing to send today")
+        return
+    subject = f"Follow-Up Radar — {datetime.now(timezone.utc).strftime('%b %d')}"
+    # digest_recipients: "all" (default) sends to every owner; "primary" only the first.
+    if crm_store.get_config("digest_recipients", "all") == "all" and crm_mail.OWNER_EMAILS:
+        for owner in crm_mail.OWNER_EMAILS:
+            await crm_mail.send_async(subject, digest, to=owner)
+    else:
+        await crm_mail.send_async(subject, digest)
 
 
 async def run_daily_loop():
     logger.info("crm_radar: daily follow-up loop started")
     while True:
         now = datetime.now(timezone.utc)
-        next_run = now.replace(hour=DIGEST_HOUR_UTC, minute=0, second=0, microsecond=0)
+        hour = crm_store.get_config_int("digest_hour_utc", DIGEST_HOUR_UTC)
+        next_run = now.replace(hour=hour, minute=0, second=0, microsecond=0)
         if next_run <= now:
             next_run += timedelta(days=1)
         await asyncio.sleep((next_run - now).total_seconds())

@@ -76,7 +76,7 @@ async def generate(query: str, instruction: str) -> str:
     resp = await claude.messages.create(
         model=MODEL,
         max_tokens=500,
-        system=DRAFT_SYSTEM_PROMPT,
+        system=DRAFT_SYSTEM_PROMPT + crm_store.directives_prompt_block(),
         messages=[{
             "role": "user",
             "content": f"Profile:\n{profile}\nHistory:\n{history_text}\n\nInstruction: {instruction}",

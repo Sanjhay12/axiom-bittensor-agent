@@ -187,7 +187,7 @@ async def _opportunity_brief(person: dict, opp: dict) -> str:
     resp = await claude.messages.create(
         model=MODEL,
         max_tokens=900,
-        system=PRODUCT_BRIEF_SYSTEM_PROMPT,
+        system=PRODUCT_BRIEF_SYSTEM_PROMPT + crm_store.directives_prompt_block(),
         messages=[{
             "role": "user",
             "content": f"Opportunity:\n{opp_text}\nContact:\n{contact_text}\nLast 5 interactions:\n{history_text}",
@@ -242,7 +242,7 @@ async def _person_brief(person: dict) -> str:
     resp = await claude.messages.create(
         model=MODEL,
         max_tokens=1200,
-        system=BRIEF_SYSTEM_PROMPT,
+        system=BRIEF_SYSTEM_PROMPT + crm_store.directives_prompt_block(),
         messages=[{"role": "user", "content": f"Profile:\n{profile}\nLast 5 interactions:\n{history_text}"}],
     )
     return resp.content[0].text.strip()
@@ -290,7 +290,7 @@ async def _firm_brief(firm_query: str, people: list[dict]) -> str:
     resp = await claude.messages.create(
         model=MODEL,
         max_tokens=1400,
-        system=BRIEF_SYSTEM_PROMPT,
+        system=BRIEF_SYSTEM_PROMPT + crm_store.directives_prompt_block(),
         messages=[{"role": "user", "content": prompt}],
     )
     return resp.content[0].text.strip()
@@ -317,7 +317,7 @@ async def _cold_fund_brief(firm_id: int, firm_name: str) -> str:
     resp = await claude.messages.create(
         model=MODEL,
         max_tokens=900,
-        system=COLD_FUND_BRIEF_PROMPT,
+        system=COLD_FUND_BRIEF_PROMPT + crm_store.directives_prompt_block(),
         messages=[{"role": "user", "content": research_text}],
     )
     return resp.content[0].text.strip()
