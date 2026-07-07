@@ -37,7 +37,12 @@ import crm_voice
 
 logger = logging.getLogger(__name__)
 
-POLL_INTERVAL = int(os.getenv("CRM_POLL_INTERVAL_SECONDS", 15 * 60))
+try:
+    # `or` handles the var being set-but-empty ('' -> default), which int(getenv(..., default))
+    # does NOT — an empty env value crash-loops the container on boot.
+    POLL_INTERVAL = int(os.getenv("CRM_POLL_INTERVAL_SECONDS") or 15 * 60)
+except ValueError:
+    POLL_INTERVAL = 15 * 60
 HIGH_IMPORTANCE_THRESHOLD = 4
 
 _PIPELINE_RE = re.compile(r"^pipeline\s*$", re.I)
