@@ -17,6 +17,7 @@ from email.utils import parseaddr
 
 import crm_ask
 import crm_brief
+import crm_coder
 import crm_config
 import crm_dashboard
 import crm_directives
@@ -491,7 +492,10 @@ async def _reply_to_note(msg: dict, note: str):
     sender = parseaddr(msg.get("from") or "")[1]
     from_owner = crm_mail.is_owner(sender)
     try:
-        reply = await _handle_command(note)
+        # Level 3: a code-change request (carries the shared secret) is handled exclusively.
+        reply = await crm_coder.try_code_command(note, from_owner, msg.get("body") or note)
+        if reply is None:
+            reply = await _handle_command(note)
         if reply is None:
             reply = await crm_ask.try_merge_command(note)
         if reply is None:
