@@ -10,6 +10,7 @@ import imaplib
 import logging
 import os
 import time
+from datetime import datetime, timedelta
 from email.header import decode_header
 
 logger = logging.getLogger(__name__)
@@ -106,7 +107,12 @@ def _extract_attachments(msg: email.message.Message) -> list[dict]:
 
 
 def fetch_new_messages() -> list[dict]:
-    """Fetches and marks-as-read all unseen messages in the agent inbox."""
+    """Fetches recent messages in the agent inbox — a rolling window, NOT just unseen.
+    Something upstream (a Gmail 'mark as read' filter, or a second client on the mailbox)
+    can mark mail read before we poll, which would hide it from an UNSEEN search and
+    silently drop it. crm_store.claim_message() (called before processing) is the real
+    dedup guard, so re-seeing already-processed mail is harmless — correctness does not
+    depend on the \\Seen flag."""
     if not (IMAP_HOST and IMAP_USER and IMAP_PASSWORD):
         logger.warning("crm_mailbox: CRM_IMAP_HOST/USER/PASSWORD not configured, skipping poll")
         return []
@@ -116,7 +122,9 @@ def fetch_new_messages() -> list[dict]:
     try:
         conn.login(IMAP_USER, IMAP_PASSWORD)
         conn.select("INBOX")
-        status, data = conn.search(None, "UNSEEN")
+        # Rolling recent window instead of UNSEEN — read-state can't hide mail from us.
+        since = (datetime.now() - timedelta(days=3)).strftime("%d-%b-%Y")
+        status, data = conn.search(None, "SINCE", since)
         if status != "OK" or not data or not data[0]:
             return []
 

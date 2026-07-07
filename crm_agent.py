@@ -645,19 +645,16 @@ async def process_once():
     messages = crm_mailbox.fetch_new_messages()
     crm_store.log_event("poll_complete", {"message_count": len(messages)})
     for msg in messages:
+        # claim FIRST: the rolling-window fetch re-returns already-processed mail every
+        # poll, so skip silently on a dup (don't log it) and only announce genuinely-new mail.
+        if not crm_store.claim_message(msg["message_id"]):
+            continue
+
         crm_store.log_event("email_received", {
             "from": msg.get("from"),
             "subject": msg.get("subject"),
             "message_id": msg.get("message_id"),
         })
-
-        if not crm_store.claim_message(msg["message_id"]):
-            crm_store.log_event("duplicate_message_skipped", {
-                "from": msg.get("from"),
-                "subject": msg.get("subject"),
-                "message_id": msg.get("message_id"),
-            })
-            continue
 
         audio_atts = [a for a in (msg.get("attachments") or []) if a["filename"].lower().endswith(crm_mailbox.AUDIO_EXTENSIONS)]
         if audio_atts:
