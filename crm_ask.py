@@ -79,7 +79,7 @@ async def answer(question: str) -> str:
     resp = await claude.messages.create(
         model=MODEL,
         max_tokens=700,
-        system=ASK_SYSTEM_PROMPT,
+        system=ASK_SYSTEM_PROMPT + crm_store.directives_prompt_block(),
         messages=[{"role": "user", "content": f"Contacts:\n{context}\n\nQuestion: {question}"}],
     )
     return resp.content[0].text.strip()

@@ -14,6 +14,7 @@ import psycopg2.extras
 from anthropic import AsyncAnthropic
 
 import store
+import crm_store
 
 claude = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 MODEL = "claude-sonnet-4-5"
@@ -315,7 +316,7 @@ async def generate() -> str:
     resp = await claude.messages.create(
         model=MODEL,
         max_tokens=1400,
-        system=DASHBOARD_PROMPT,
+        system=DASHBOARD_PROMPT + crm_store.directives_prompt_block(),
         messages=[{"role": "user", "content": f"Today's date: {today}\n\nCRM signals (relative times in days_ago):\n{context}"}],
     )
     return resp.content[0].text.strip()

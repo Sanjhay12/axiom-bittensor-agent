@@ -18,6 +18,7 @@ from email.utils import parseaddr
 import crm_ask
 import crm_brief
 import crm_dashboard
+import crm_directives
 import crm_docs
 import crm_draft
 import crm_enrich
@@ -486,6 +487,8 @@ async def _reply_to_note(msg: dict, note: str):
         await _send_report(msg, days)
         return
 
+    sender = parseaddr(msg.get("from") or "")[1]
+    from_owner = crm_mail.is_owner(sender)
     try:
         reply = await _handle_command(note)
         if reply is None:
@@ -502,6 +505,8 @@ async def _reply_to_note(msg: dict, note: str):
                     return
                 reply = await _dispatch_action(action)
         if reply is None:
+            reply = await crm_directives.try_directive_command(note, from_owner)
+        if reply is None:
             reply = await crm_ask.try_natural_update(note)
         if reply is None:
             reply = await crm_ask.answer(note)
@@ -514,7 +519,6 @@ async def _reply_to_note(msg: dict, note: str):
         })
         reply = "Got your note but hit an error processing it. Logged for now."
 
-    sender = parseaddr(msg.get("from") or "")[1]
     subject = f"Re: {msg.get('subject') or 'your note'}"
     body = f"<b>You wrote:</b> {note}\n\n{reply}"
     await crm_mail.send_async(subject, body, in_reply_to=msg.get("message_id"), to=sender)

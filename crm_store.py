@@ -176,12 +176,62 @@ def init_crm_db():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crm_firm_flags_message_id ON crm_firm_flags(message_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crm_firm_flags_pending ON crm_firm_flags(firm_a_id, firm_b_id) WHERE resolved_at IS NULL")
 
+            # Level 1 "directives": standing instructions the owner sets by email to steer the
+            # agent's behaviour. Injected into the agent's prompts (dashboard, Q&A, drafting).
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS crm_directives (
+                    id          SERIAL PRIMARY KEY,
+                    directive   TEXT NOT NULL,
+                    created_by  TEXT,
+                    created_at  INTEGER NOT NULL,
+                    active      BOOLEAN NOT NULL DEFAULT TRUE
+                )
+            """)
+
             # Bulk imports do a name/firm lookup per row — these keep get_or_create_firm
             # and the duplicate/name-conflict checks from degrading to full table scans
             # as the tables grow (was O(rows x table size) before these existed).
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crm_firms_name_lower ON crm_firms (LOWER(name))")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crm_firms_name_lower_pattern ON crm_firms (LOWER(name) text_pattern_ops)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crm_people_name_lower ON crm_people (LOWER(name))")
+
+
+# ── Directives (Level 1: owner steers agent behaviour by email) ──────────────
+
+def add_directive(directive: str, created_by: str | None) -> int:
+    with store.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO crm_directives (directive, created_by, created_at) VALUES (%s,%s,%s) RETURNING id",
+                (directive.strip(), created_by, int(time.time())),
+            )
+            return cur.fetchone()[0]
+
+
+def get_active_directives() -> list[dict]:
+    with store.get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT id, directive, created_by FROM crm_directives WHERE active = TRUE ORDER BY id")
+            return [dict(r) for r in cur.fetchall()]
+
+
+def deactivate_directive(directive_id: int) -> bool:
+    with store.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE crm_directives SET active = FALSE WHERE id = %s AND active = TRUE", (directive_id,))
+            return cur.rowcount > 0
+
+
+def directives_prompt_block() -> str:
+    """Active directives formatted for injection into an LLM system prompt. Empty if none."""
+    ds = get_active_directives()
+    if not ds:
+        return ""
+    lines = "\n".join(f"- {d['directive']}" for d in ds)
+    return (
+        "\n\nSTANDING INSTRUCTIONS from the fund manager — these override defaults; follow them:\n"
+        + lines
+    )
 
 
 _LEGAL_SUFFIX_RE = re.compile(
