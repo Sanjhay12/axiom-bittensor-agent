@@ -1,4 +1,4 @@
-"""Entry point for the Cedar Ridge CRM agent on Railway."""
+"""Entry point for the Cedar Ridge CRM agent (Render worker)."""
 import asyncio
 import logging
 from dotenv import load_dotenv

@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 IMAP_HOST = os.getenv("CRM_IMAP_HOST")
 IMAP_USER = os.getenv("CRM_IMAP_USER")
 IMAP_PASSWORD = os.getenv("CRM_IMAP_PASSWORD")
-OWNER_EMAIL = os.getenv("OWNER_EMAIL", "").lower()
+OWNER_EMAILS = [e.strip().lower() for e in os.getenv("OWNER_EMAIL", "").split(",") if e.strip()]
 
 
 def _decode(value: str | None) -> str:
@@ -52,7 +52,36 @@ def _extract_body(msg: email.message.Message) -> str:
         return ""
 
 
-SPREADSHEET_EXTENSIONS = (".xlsx", ".csv")
+import re as _re
+
+_QUOTE_PATTERNS = _re.compile(
+    r"(^On .+wrote:\s*$|^>.*$|^-{3,}.*Original Message.*-{3,}$|^_{5,}$|^From:\s+)",
+    _re.MULTILINE | _re.IGNORECASE,
+)
+
+
+def _strip_quoted_reply(body: str) -> str:
+    """For reply emails, return only the content above the first quoted block."""
+    lines = body.splitlines()
+    cutoff = len(lines)
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if (
+            stripped.startswith(">")
+            or _re.match(r"^On .+ wrote:$", stripped, _re.IGNORECASE)
+            or _re.match(r"^-{3,}", stripped)
+            or _re.match(r"^_{5,}", stripped)
+            or _re.match(r"^From:\s+", stripped, _re.IGNORECASE)
+        ):
+            cutoff = i
+            break
+    return "\n".join(lines[:cutoff]).strip()
+
+
+SPREADSHEET_EXTENSIONS = (".xlsx", ".csv", ".numbers")
+DOCUMENT_EXTENSIONS = (".pdf",)
+AUDIO_EXTENSIONS = (".m4a", ".mp3", ".wav", ".ogg", ".oga", ".mp4", ".webm", ".aac", ".amr")
+ATTACHMENT_EXTENSIONS = SPREADSHEET_EXTENSIONS + DOCUMENT_EXTENSIONS + AUDIO_EXTENSIONS
 
 
 def _extract_attachments(msg: email.message.Message) -> list[dict]:
@@ -65,7 +94,7 @@ def _extract_attachments(msg: email.message.Message) -> list[dict]:
         if not filename or "attachment" not in disp.lower():
             continue
         filename = _decode(filename)
-        if not filename.lower().endswith(SPREADSHEET_EXTENSIONS):
+        if not filename.lower().endswith(ATTACHMENT_EXTENSIONS):
             continue
         try:
             content = part.get_payload(decode=True)
@@ -104,6 +133,11 @@ def fetch_new_messages() -> list[dict]:
                 from_header = _decode(msg.get("From"))
                 to_header = _decode(msg.get("To"))
                 cc_header = _decode(msg.get("Cc"))
+                # Prefer In-Reply-To; References' last entry is the immediate parent
+                # when In-Reply-To is missing (some clients only set one or the other).
+                in_reply_to = msg.get("In-Reply-To")
+                if not in_reply_to and msg.get("References"):
+                    in_reply_to = msg.get("References").split()[-1]
 
                 try:
                     ts = int(email.utils.parsedate_to_datetime(msg.get("Date")).timestamp())
@@ -111,7 +145,11 @@ def fetch_new_messages() -> list[dict]:
                     ts = int(time.time())
 
                 recipients = (to_header + cc_header).lower()
-                direction = "bcc" if OWNER_EMAIL and OWNER_EMAIL in recipients else "forwarded"
+                direction = "bcc" if any(o in recipients for o in OWNER_EMAILS) else "forwarded"
+
+                body = _extract_body(msg)
+                if subject.lower().startswith("re:"):
+                    body = _strip_quoted_reply(body)
 
                 messages.append({
                     "message_id": message_id,
@@ -120,8 +158,9 @@ def fetch_new_messages() -> list[dict]:
                     "to": to_header,
                     "cc": cc_header,
                     "ts": ts,
-                    "body": _extract_body(msg),
+                    "body": body,
                     "direction": direction,
+                    "in_reply_to": in_reply_to,
                     "attachments": _extract_attachments(msg),
                 })
             except Exception as e:

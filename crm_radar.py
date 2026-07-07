@@ -52,6 +52,8 @@ def build_digest() -> str | None:
             scored = crm_score.lp_score(p, crm_store.list_interactions(p["id"]))
             by_id[p["id"]] = {**p, **scored}
 
+    opps_by_person = crm_store.list_opportunities_for_people(list(by_id.keys()))
+
     flagged = []
     for p in by_id.values():
         days = _days_since(p.get("last_touch_ts"))
@@ -59,15 +61,28 @@ def build_digest() -> str | None:
         has_open_loop = bool(p.get("next_step"))
         is_high_score = (p.get("composite_score") or 0) >= HIGH_SCORE_THRESHOLD
         is_manual = bool(p.get("manual_priority"))
-        if not (is_cold or has_open_loop or is_high_score or is_manual):
+
+        opps = opps_by_person.get(p["id"], [])
+        opp_next_steps = [o for o in opps if o.get("next_step")]
+        opp_objections = [o for o in opps if o.get("objections")]
+
+        if not (is_cold or has_open_loop or is_high_score or is_manual or opp_next_steps or opp_objections):
             continue
-        flagged.append((p, days, is_cold, has_open_loop, is_manual))
+        flagged.append((p, days, is_cold, has_open_loop, is_manual, opp_next_steps, opp_objections))
 
     if not flagged:
         return None
 
     flagged.sort(key=lambda t: (not t[4], -(t[0].get("composite_score") or 0)))
     flagged = flagged[:MAX_ITEMS]
+
+    # Fund-manager/GP-side contacts (relationship_type "founder") are reporting on their
+    # OWN fund, not a personal relationship being cultivated — Joe wants one line per
+    # FUND, not one per employee (e.g. Fairbridge's two IR contacts shouldn't produce two
+    # separate lines). They're rolled into a single "Funds" section below, one per firm,
+    # instead of appearing in the per-person category list.
+    founder_items = [item for item in flagged if item[0].get("relationship_type") == "founder"]
+    flagged = [item for item in flagged if item[0].get("relationship_type") != "founder"]
 
     grouped: dict[str, list] = {}
     for item in flagged:
@@ -78,16 +93,77 @@ def build_digest() -> str | None:
         if category not in grouped:
             continue
         lines.append(f"<b>{category}</b>")
-        for p, days, is_cold, has_open_loop, is_manual in grouped[category]:
+        for p, days, is_cold, has_open_loop, is_manual, opp_next_steps, opp_objections in grouped[category]:
             name = p.get("name") or p["email"]
             firm = f" at {p['firm_name']}" if p.get("firm_name") else ""
             days_str = f"last touched {days}d ago" if days is not None else "no recorded touch"
             channel = f"via {p.get('contact_channel') or 'email'}"
-            flag = "manually flagged" if is_manual else ("cold" if is_cold else ("open loop" if has_open_loop else "high LP score"))
-            line = f"  <b>{name}{firm}</b> — score {p.get('composite_score', 0)}/100, {days_str} ({channel}), {flag}"
+            reasons = []
+            if is_manual:
+                reasons.append("manually flagged")
+            if is_cold:
+                reasons.append("cold")
+            if has_open_loop:
+                reasons.append("open loop")
+            if opp_next_steps:
+                reasons.append("opportunity next step")
+            if opp_objections:
+                reasons.append("unresolved objection")
+            if not reasons:
+                reasons.append("high LP score")
+            line = f"  <b>{name}{firm}</b> — score {p.get('composite_score', 0)}/100, {days_str} ({channel}), {', '.join(reasons)}"
             if p.get("next_step"):
                 line += f"\n    Next step: {p['next_step']}"
+            seen_opp_ids = set()
+            for o in (opp_next_steps or []) + (opp_objections or []):
+                if o["id"] in seen_opp_ids:
+                    continue
+                seen_opp_ids.add(o["id"])
+                if o.get("next_step"):
+                    line += f"\n    {o['product']} next step: {o['next_step']}"
+                if o.get("objections"):
+                    line += f"\n    {o['product']} objection: {o['objections']}"
             lines.append(line)
+        lines.append("")
+
+    if founder_items:
+        lines.append("<b>Funds</b>")
+        by_firm: dict = {}
+        for p, *_rest, opp_next_steps, opp_objections in founder_items:
+            firm_key = p.get("firm_id") or p.get("firm_name") or p["id"]
+            entry = by_firm.setdefault(firm_key, {"firm_name": p.get("firm_name") or "Unknown firm", "opps": {}})
+            # Keyed by product name, not opportunity row id — each employee at the same
+            # fund gets their OWN opportunity row for the same product (opportunities are
+            # keyed on person + product), so de-duping by id would still show the same
+            # fund/product twice when two employees are both tied to it.
+            for o in (opp_next_steps or []) + (opp_objections or []):
+                existing = entry["opps"].get(o["product"])
+                if existing is None:
+                    entry["opps"][o["product"]] = o
+                else:
+                    if not existing.get("next_step") and o.get("next_step"):
+                        existing["next_step"] = o["next_step"]
+                    if not existing.get("objections") and o.get("objections"):
+                        existing["objections"] = o["objections"]
+
+        def _firm_score(entry):
+            opps = list(entry["opps"].values())
+            if not opps:
+                return 0
+            # investor_count=0 disables the investor-breadth signal here — this section
+            # scores fund/deal status, not how many of the fund's own staff emailed.
+            return max(crm_score.opportunity_score(o, 0)["composite_score"] for o in opps)
+
+        for entry in sorted(by_firm.values(), key=_firm_score, reverse=True):
+            opps = list(entry["opps"].values())
+            lines.append(f"  <b>{entry['firm_name']}</b> — score {_firm_score(entry)}/100")
+            for o in opps:
+                sub = f"    {o['product']} ({o.get('stage') or 'New'})"
+                if o.get("next_step"):
+                    sub += f": {o['next_step']}"
+                lines.append(sub)
+                if o.get("objections"):
+                    lines.append(f"    {o['product']} objection: {o['objections']}")
         lines.append("")
 
     return "\n".join(lines).strip()

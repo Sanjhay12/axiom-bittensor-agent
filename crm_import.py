@@ -8,19 +8,23 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import os
+import tempfile
 import time
 
 import crm_store
 
 logger = logging.getLogger(__name__)
 
-SPREADSHEET_EXTENSIONS = (".xlsx", ".csv")
+SPREADSHEET_EXTENSIONS = (".xlsx", ".csv", ".numbers")
 
 COLUMN_ALIASES = {
     "name": ["name", "full name", "contact name", "contact"],
+    "first_name": ["first name", "firstname", "first", "given name", "first_name", "fname", "forename"],
+    "last_name": ["last name", "lastname", "last", "surname", "family name", "last_name", "lname"],
     "email": ["email", "e-mail", "email address"],
-    "phone": ["phone", "phone number", "mobile", "cell", "telephone"],
-    "firm_name": ["firm", "company", "organization", "organisation", "fund"],
+    "phone": ["phone", "phone number", "mobile", "cell", "telephone", "mobile phone"],
+    "firm_name": ["firm", "company", "organization", "organisation", "fund", "account name", "account"],
     "role": ["role", "title", "position", "job title"],
     "relationship_type": ["relationship type", "relationship", "type", "category"],
     "mandate": ["mandate", "deal", "fund mandate"],
@@ -80,8 +84,37 @@ def _rows_from_xlsx(content: bytes) -> tuple[list[str], list[list]]:
     return headers, [list(r) for r in rows[1:]]
 
 
+def _rows_from_numbers(content: bytes) -> tuple[list[str], list[list]]:
+    from numbers_parser import Document
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".numbers")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(content)
+        doc = Document(tmp_path)
+        rows = doc.sheets[0].tables[0].rows(values_only=True)
+        del doc  # releases numbers_parser's internal zip handle so the temp file can be deleted on Windows
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    if not rows:
+        return [], []
+    headers = [str(h) if h is not None else "" for h in rows[0]]
+    return headers, [list(r) for r in rows[1:]]
+
+
 def import_contacts(content: bytes, filename: str, on_new_person=None) -> dict:
-    """Returns {"added": int, "updated": int, "skipped": int, "total": int}.
+    """Returns {"added": int, "updated": int, "skipped": int, "total": int,
+    "duplicates": [...], "name_conflicts": [...]}.
+
+    Duplicate/conflict rows are collected rather than emailed one at a time — a
+    single big import can hit these dozens of times, and a separate email per hit
+    used to flood the inbox (and each was a blocking synchronous SMTP send, which
+    made large imports far slower than the row-processing itself warranted). The
+    caller sends one consolidated notice at the end instead.
 
     on_new_person, if given, is called as on_new_person(person_id, extracted) for every
     brand-new contact (not updates to existing ones) — used to trigger enrichment the
@@ -92,6 +125,8 @@ def import_contacts(content: bytes, filename: str, on_new_person=None) -> dict:
         headers, rows = _rows_from_csv(content)
     elif filename_lower.endswith(".xlsx"):
         headers, rows = _rows_from_xlsx(content)
+    elif filename_lower.endswith(".numbers"):
+        headers, rows = _rows_from_numbers(content)
     else:
         raise ValueError(f"Unsupported spreadsheet format: {filename}")
 
@@ -101,6 +136,8 @@ def import_contacts(content: bytes, filename: str, on_new_person=None) -> dict:
 
     added = updated = skipped = 0
     now = int(time.time())
+    duplicates = []
+    name_conflicts = []
 
     for row in rows:
         if not any(row):
@@ -112,6 +149,10 @@ def import_contacts(content: bytes, filename: str, on_new_person=None) -> dict:
 
         email = (str(record.get("email") or "")).strip().lower()
         name = (str(record.get("name") or "")).strip()
+        if not name:
+            first = (str(record.get("first_name") or "")).strip()
+            last = (str(record.get("last_name") or "")).strip()
+            name = " ".join(filter(None, [first, last]))
         if not email and not name:
             skipped += 1
             continue
@@ -134,7 +175,21 @@ def import_contacts(content: bytes, filename: str, on_new_person=None) -> dict:
 
         firm_name = str(record["firm_name"]).strip() if record.get("firm_name") else None
         extracted["firm_name"] = firm_name
-        firm_id = crm_store.get_or_create_firm(firm_name)
+        firm_id, _ = crm_store.get_or_create_firm(firm_name)
+
+        # Skip true duplicates (same name + same firm, no email to distinguish)
+        if not email and extracted.get("person_name"):
+            existing = crm_store.find_duplicate_by_name_and_firm(extracted["person_name"], firm_id)
+            if existing:
+                logger.info(f"crm_import: skipping duplicate '{extracted['person_name']}' at '{firm_name}'")
+                duplicates.append({
+                    "name": extracted["person_name"],
+                    "firm_name": firm_name,
+                    "existing_email": existing["email"],
+                })
+                skipped += 1
+                continue
+
         person_id, is_new = crm_store.upsert_person(extracted, firm_id, now, source="import")
         if is_new:
             added += 1
@@ -143,4 +198,22 @@ def import_contacts(content: bytes, filename: str, on_new_person=None) -> dict:
         else:
             updated += 1
 
-    return {"added": added, "updated": updated, "skipped": skipped, "total": added + updated + skipped}
+        if extracted.get("person_name"):
+            conflicts = crm_store.find_name_conflicts(extracted["person_name"], person_id)
+            if conflicts:
+                name_conflicts.append({
+                    "person_id": person_id,
+                    "name": extracted["person_name"],
+                    "firm_name": firm_name,
+                    "email": extracted.get("person_email"),
+                    "conflicts": conflicts,
+                })
+
+    return {
+        "added": added,
+        "updated": updated,
+        "skipped": skipped,
+        "total": added + updated + skipped,
+        "duplicates": duplicates,
+        "name_conflicts": name_conflicts,
+    }

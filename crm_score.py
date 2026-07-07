@@ -144,12 +144,104 @@ def score_by_query(query: str) -> dict | None:
     return result
 
 
+def _opp_stage_progress(opp: dict) -> Signal:
+    stage = opp.get("stage")
+    if not stage or stage not in STAGE_SCORES:
+        return Signal(0, 0)
+    return Signal(STAGE_SCORES[stage], 1)
+
+
+def _opp_momentum(opp: dict) -> Signal:
+    if not opp.get("next_step"):
+        return Signal(0, 0)
+    return Signal(100, 1)
+
+
+def _opp_deal_size(opp: dict) -> Signal:
+    structured = opp.get("deal_amount_usd")
+    if not structured:
+        return Signal(0, 0)
+    millions = structured / 1_000_000
+    return Signal(round(min(100, millions * 10), 1), 1)
+
+
+def _opp_objection_health(opp: dict) -> Signal:
+    """Fraction of raised objections that are marked resolved — a deal with every
+    objection resolved scores high, one with several still open scores low."""
+    profile = opp.get("objection_profile")
+    if isinstance(profile, str):
+        try:
+            profile = json.loads(profile)
+        except (json.JSONDecodeError, TypeError):
+            profile = None
+    active = [k for k, v in (profile or {}).items() if v]
+    if not active:
+        return Signal(0, 0)
+    resolutions = opp.get("objection_resolutions")
+    if isinstance(resolutions, str):
+        try:
+            resolutions = json.loads(resolutions)
+        except (json.JSONDecodeError, TypeError):
+            resolutions = {}
+    resolutions = resolutions or {}
+    resolved = sum(1 for k in active if resolutions.get(k))
+    return Signal(round((resolved / len(active)) * 100, 1), 1)
+
+
+def _opp_investor_breadth(investor_count: int) -> Signal:
+    """More than one investor actively engaged on the same deal is a real signal —
+    it means organizational traction, not just one person's interest."""
+    if investor_count <= 0:
+        return Signal(0, 0)
+    return Signal(round(min(100, investor_count * 40), 1), 1)
+
+
+OPP_SIGNALS = [
+    ("stage_progress", _opp_stage_progress, 0.40),
+    ("momentum", _opp_momentum, 0.15),
+    ("deal_size", _opp_deal_size, 0.15),
+    ("objection_health", _opp_objection_health, 0.15),
+]
+
+
+def opportunity_score(opp: dict, investor_count: int = 1) -> dict:
+    """Same weighted-signal architecture as lp_score, but for one opportunity/product —
+    lets the radar and pipeline views score a deal on its own merits (stage, momentum,
+    deal size, objection resolution, how many investors are actually engaged on it)
+    instead of only ever scoring the people attached to it."""
+    breakdown = {}
+    composite = 0.0
+    total_weight = 0.0
+
+    for label, fn, weight in OPP_SIGNALS:
+        signal = fn(opp)
+        if signal.confidence == 0:
+            breakdown[label] = None
+            continue
+        breakdown[label] = signal.score
+        composite += signal.score * weight
+        total_weight += weight
+
+    breadth = _opp_investor_breadth(investor_count)
+    if breadth.confidence:
+        breakdown["investor_breadth"] = breadth.score
+        composite += breadth.score * 0.15
+        total_weight += 0.15
+    else:
+        breakdown["investor_breadth"] = None
+
+    if total_weight > 0:
+        composite = round(composite / total_weight, 1)
+
+    return {"composite_score": composite, "breakdown": breakdown}
+
+
 def rank_active_people() -> list[dict]:
     """Every active person merged with their score — used by the radar digest and ranking views."""
     people = crm_store.list_active_people()
+    interactions_by_person = crm_store.list_interactions_for_people([p["id"] for p in people])
     results = []
     for p in people:
-        interactions = crm_store.list_interactions(p["id"])
-        scored = lp_score(p, interactions)
+        scored = lp_score(p, interactions_by_person.get(p["id"], []))
         results.append({**p, **scored})
     return sorted(results, key=lambda r: r["composite_score"], reverse=True)
