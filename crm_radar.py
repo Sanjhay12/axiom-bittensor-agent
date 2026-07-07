@@ -166,7 +166,10 @@ def build_digest() -> str | None:
                     lines.append(f"    {o['product']} objection: {o['objections']}")
         lines.append("")
 
-    return "\n".join(lines).strip()
+    body = "\n".join(lines).strip()
+    if body:
+        body += "\n\n— CRM agent"
+    return body
 
 
 async def send_digest():
