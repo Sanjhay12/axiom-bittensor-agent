@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import smtplib
+import socket
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -69,10 +70,26 @@ def send(
         msg.attach(part)
 
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+        # Force IPv4: Railway (and many container hosts) can't route IPv6, so connecting to
+        # Gmail's IPv6 address fails with "[Errno 101] Network is unreachable". Resolve to an
+        # IPv4 address and connect there, then point the client back at the hostname so
+        # STARTTLS verifies the certificate against smtp.gmail.com, not the raw IP.
+        try:
+            ipv4 = socket.getaddrinfo(SMTP_HOST, SMTP_PORT, socket.AF_INET, socket.SOCK_STREAM)[0][4][0]
+        except (socket.gaierror, IndexError):
+            ipv4 = SMTP_HOST
+        server = smtplib.SMTP(timeout=20)
+        try:
+            server.connect(ipv4, SMTP_PORT)
+            server._host = SMTP_HOST
             server.starttls()
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.sendmail(SMTP_USER, [recipient], msg.as_string())
+        finally:
+            try:
+                server.quit()
+            except Exception:
+                pass
         import crm_store
         crm_store.log_event("reply_sent", {"to": recipient, "subject": subject})
         return message_id

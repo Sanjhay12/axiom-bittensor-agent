@@ -162,7 +162,9 @@ def _diff(edits: dict) -> str:
 
 async def try_code_command(note: str, from_owner: bool, raw: str) -> str | None:
     """Only fires when the email carries the secret (trigger + auth). `raw` = full body."""
-    if not has_secret(raw) and not has_secret(note):
+    sec = has_secret(raw) or has_secret(note)
+    logger.info("crm_coder: secret_present=%s from_owner=%s", sec, from_owner)
+    if not sec:
         return None
     if not from_owner:
         return "That email carried the code passphrase but isn't from a recognised owner — ignored."

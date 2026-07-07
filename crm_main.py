@@ -28,11 +28,14 @@ def _boot_diagnostics():
         ).stdout.strip() or "unknown"
     except Exception:
         commit = "unknown"
+    sec = crm_coder.CODE_SECRET or ""
     logging.getLogger("crm_main").info(
-        "crm boot: commit=%s | owners=%s | code_changes=%s | github_token=%s",
+        "crm boot: commit=%s | owners=%s | code_changes=%s (secret_len=%d clean=%s) | github_token=%s",
         commit,
         crm_mail.OWNER_EMAILS or "(none!)",
         "ENABLED" if crm_coder.CODE_SECRET else "DISABLED (CRM_CODE_SECRET not set)",
+        len(sec),
+        sec == sec.strip() and sec != "",
         "set" if crm_coder.GITHUB_TOKEN else "MISSING",
     )
 
