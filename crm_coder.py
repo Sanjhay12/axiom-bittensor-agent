@@ -2,34 +2,33 @@
 Level 3 — the owner changes the CRM's CODE by email (direct-change mode).
 
 An owner emails a code-change request that INCLUDES the shared secret; a Claude
-coding loop (Opus 4.8, tool-use) edits the crm_* source in the repo, the change is
-test-gated, and only on green is it committed, pushed (Railway auto-deploys), and the
-diff emailed back. Per the owner's choice this is direct (no PR).
+coding loop (Opus 4.8, tool-use) edits the crm_* source, the change is test-gated,
+and only on green is it committed to main via the GitHub API (Railway auto-deploys)
+and the diff emailed back. Per the owner's choice this is direct (no PR).
 
-Guardrails (see crm_agent wiring):
-  1. Shared secret in the email body — the real auth. `From:` is spoofable, so a code
-     change only runs when CRM_CODE_SECRET is present. Its presence is also the trigger,
-     so ordinary emails can never touch code.
-  2. Tests must pass (py_compile of changed files + test_crm.py) before anything is pushed;
-     a failing change is reverted, never deployed.
-  3. The exact git diff is emailed back to whoever asked — an audit trail.
+Deployed containers have no local git repo, so the commit is made through the GitHub
+Git Data API (blobs -> tree -> commit -> update ref) using GITHUB_TOKEN — no `.git`
+needed. Edited files are written to the (ephemeral) container fs only so tests can run;
+nothing persists unless the API commit succeeds.
 
+Guardrails:
+  1. Shared secret in the email (CRM_CODE_SECRET) — the real auth AND the trigger, since
+     From: is spoofable. No secret -> never touches code.
+  2. Tests must pass (py_compile of changed files + test_crm.py) before the commit.
+  3. The unified diff is emailed back to the requester (audit trail).
 Only crm_* source files are editable — never .env, trading code, infra, or this file.
 
-Deploy requirements (Railway env): CRM_CODE_SECRET (the passphrase) and GITHUB_TOKEN
-(a PAT with push access, used to push from the container).
+Deploy env: CRM_CODE_SECRET (passphrase) and GITHUB_TOKEN (PAT, Contents:write).
 """
 from __future__ import annotations
-import asyncio
-import json
+import difflib
 import logging
 import os
 import re
 import subprocess
 
+import httpx
 from anthropic import AsyncAnthropic
-
-import crm_mail
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +38,9 @@ MODEL = "claude-opus-4-8"
 REPO = os.path.dirname(os.path.abspath(__file__))
 CODE_SECRET = os.getenv("CRM_CODE_SECRET")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GIT_REMOTE = "https://github.com/Sanjhay12/axiom-bittensor-agent.git"
+GH_OWNER, GH_REPO, GH_BRANCH = "Sanjhay12", "axiom-bittensor-agent", "main"
+GH_API = f"https://api.github.com/repos/{GH_OWNER}/{GH_REPO}"
 
-# Editable surface: crm_* modules only. Never .env, store/trader/risk (trading), this file.
 _EDITABLE_RE = re.compile(r"^crm_[a-z0-9_]+\.py$")
 _PROTECTED = {"crm_coder.py", "crm_mail.py"}  # coder can't rewrite its own auth path
 MAX_STEPS = 24
@@ -50,7 +49,7 @@ SYSTEM = """You are a careful software engineer editing a Python fundraising-CRM
 
 Rules:
 - Only edit crm_*.py files (never .env, trading code, or infra). Use list_files to see what's editable.
-- read_file before write_file. write_file replaces the whole file, so read it, change what's needed, and write the complete new contents.
+- read_file before write_file. write_file replaces the whole file, so read it, change only what's needed, and write the complete new contents.
 - Match the surrounding code's style. Keep imports valid. Don't break other features.
 - When done, stop (end your turn). Do not commit or push — the harness runs tests and deploys.
 - If the request is unsafe, unclear, or outside the crm_* surface, do nothing and explain why in your final message."""
@@ -71,47 +70,49 @@ def has_secret(text: str) -> bool:
     return bool(CODE_SECRET) and bool(text) and CODE_SECRET in text
 
 
-def _safe_path(path: str) -> str | None:
+def _safe_name(path: str) -> str | None:
     name = os.path.basename((path or "").strip())
     if name != (path or "").strip().lstrip("./"):
         return None
     if not _EDITABLE_RE.match(name) or name in _PROTECTED:
         return None
-    return os.path.join(REPO, name)
+    return name
 
 
-def _git(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", REPO, *args], capture_output=True, text=True)
-
-
-def _run_tool(name: str, inp: dict, written: set) -> tuple[str, bool]:
-    """Returns (result_text, is_error)."""
+def _run_tool(name: str, inp: dict, edits: dict) -> tuple[str, bool]:
+    """edits maps filename -> {'original': str, 'content': str} for changed files."""
     if name == "list_files":
         files = sorted(f for f in os.listdir(REPO) if _EDITABLE_RE.match(f) and f not in _PROTECTED)
         return "\n".join(files), False
     if name == "read_file":
-        p = _safe_path(inp.get("path", ""))
+        fn = _safe_name(inp.get("path", ""))
+        p = os.path.join(REPO, fn) if fn else None
         if not p or not os.path.exists(p):
             return f"Cannot read {inp.get('path')!r}: not an editable crm_* file.", True
         with open(p, encoding="utf-8") as f:
             return f.read(), False
     if name == "write_file":
-        p = _safe_path(inp.get("path", ""))
-        if not p:
+        fn = _safe_name(inp.get("path", ""))
+        if not fn:
             return f"Refused: {inp.get('path')!r} is not an editable crm_* file.", True
+        p = os.path.join(REPO, fn)
+        if fn not in edits:  # capture the original once, for diff + tests
+            with open(p, encoding="utf-8") as f:
+                edits[fn] = {"original": f.read()}
+        content = inp.get("content", "")
+        edits[fn]["content"] = content
         with open(p, "w", encoding="utf-8") as f:
-            f.write(inp.get("content", ""))
-        written.add(os.path.basename(p))
-        return f"Wrote {os.path.basename(p)}.", False
+            f.write(content)
+        return f"Wrote {fn}.", False
     return f"Unknown tool {name}", True
 
 
-def _tests_pass(changed: set) -> tuple[bool, str]:
-    """Rail 2: compile every changed file; run test_crm.py if present. No push on failure."""
-    for f in changed:
-        r = subprocess.run(["python", "-m", "py_compile", os.path.join(REPO, f)], capture_output=True, text=True)
+def _tests_pass(changed: list[str]) -> tuple[bool, str]:
+    """Rail 2: compile every changed file; run test_crm.py if present."""
+    for fn in changed:
+        r = subprocess.run(["python", "-m", "py_compile", os.path.join(REPO, fn)], capture_output=True, text=True)
         if r.returncode != 0:
-            return False, f"{f} does not compile:\n{r.stderr[-800:]}"
+            return False, f"{fn} does not compile:\n{r.stderr[-800:]}"
     if os.path.exists(os.path.join(REPO, "test_crm.py")):
         r = subprocess.run(["python", "-m", "pytest", "-q", "test_crm.py"], cwd=REPO, capture_output=True, text=True)
         if r.returncode != 0:
@@ -119,30 +120,50 @@ def _tests_pass(changed: set) -> tuple[bool, str]:
     return True, ""
 
 
-def _revert(changed: set):
-    for f in changed:
-        _git("checkout", "--", f)
+def _restore_originals(edits: dict):
+    for fn, e in edits.items():
+        with open(os.path.join(REPO, fn), "w", encoding="utf-8") as f:
+            f.write(e["original"])
 
 
-def _commit_and_push(changed: set, request: str, requester: str) -> tuple[bool, str]:
-    _git("add", *changed)
-    msg = f"CRM change via email: {request[:120]}\n\nRequested by {requester}\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
-    c = _git("commit", "-m", msg)
-    if c.returncode != 0:
-        return False, f"commit failed: {c.stderr[-400:]}"
+async def _commit_via_github(edits: dict, message: str) -> tuple[bool, str]:
+    """Atomic multi-file commit to main via the GitHub Git Data API. No local git needed."""
     if not GITHUB_TOKEN:
-        return False, "committed locally but GITHUB_TOKEN is not set, so I couldn't push (change will be lost on redeploy). Set GITHUB_TOKEN on the CRM service."
-    push_url = GIT_REMOTE.replace("https://", f"https://x-access-token:{GITHUB_TOKEN}@")
-    p = _git("push", push_url, "HEAD:main")
-    if p.returncode != 0:
-        return False, f"push failed: {p.stderr[-400:]}"
-    return True, ""
+        return False, "GITHUB_TOKEN not set — can't push."
+    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
+    try:
+        async with httpx.AsyncClient(base_url=GH_API, headers=headers, timeout=30) as gh:
+            ref = (await gh.get(f"/git/ref/heads/{GH_BRANCH}")).raise_for_status().json()
+            base_commit_sha = ref["object"]["sha"]
+            base_commit = (await gh.get(f"/git/commits/{base_commit_sha}")).raise_for_status().json()
+            base_tree_sha = base_commit["tree"]["sha"]
+            tree_items = []
+            for fn, e in edits.items():
+                blob = (await gh.post("/git/blobs", json={"content": e["content"], "encoding": "utf-8"})).raise_for_status().json()
+                tree_items.append({"path": fn, "mode": "100644", "type": "blob", "sha": blob["sha"]})
+            tree = (await gh.post("/git/trees", json={"base_tree": base_tree_sha, "tree": tree_items})).raise_for_status().json()
+            commit = (await gh.post("/git/commits", json={"message": message, "tree": tree["sha"], "parents": [base_commit_sha]})).raise_for_status().json()
+            (await gh.patch(f"/git/refs/heads/{GH_BRANCH}", json={"sha": commit["sha"]})).raise_for_status()
+            return True, commit["sha"][:7]
+    except httpx.HTTPStatusError as e:
+        return False, f"GitHub API {e.response.status_code}: {e.response.text[:300]}"
+    except Exception as e:
+        return False, str(e)
+
+
+def _diff(edits: dict) -> str:
+    out = []
+    for fn, e in edits.items():
+        out += list(difflib.unified_diff(
+            e["original"].splitlines(keepends=True), e["content"].splitlines(keepends=True),
+            fromfile=fn, tofile=fn, n=2))
+    return "".join(out)
 
 
 async def try_code_command(note: str, from_owner: bool, raw: str) -> str | None:
-    """Only fires when the email carries the secret (trigger + auth). `raw` is the full body."""
+    """Only fires when the email carries the secret (trigger + auth). `raw` = full body."""
     if not has_secret(raw) and not has_secret(note):
-        return None  # not a code request — fall through to config/directives/answer
+        return None
     if not from_owner:
         return "That email carried the code passphrase but isn't from a recognised owner — ignored."
 
@@ -150,13 +171,12 @@ async def try_code_command(note: str, from_owner: bool, raw: str) -> str | None:
     logger.info("crm_coder: code-change request received")
 
     messages = [{"role": "user", "content": f"Owner's code-change request:\n{request}"}]
-    written: set = set()
+    edits: dict = {}
     final_text = ""
     try:
         for _ in range(MAX_STEPS):
             resp = await claude.messages.create(
-                model=MODEL, max_tokens=8000,
-                system=SYSTEM, tools=TOOLS, messages=messages,
+                model=MODEL, max_tokens=8000, system=SYSTEM, tools=TOOLS, messages=messages,
             )
             if resp.stop_reason != "tool_use":
                 final_text = next((b.text for b in resp.content if b.type == "text"), "")
@@ -165,30 +185,30 @@ async def try_code_command(note: str, from_owner: bool, raw: str) -> str | None:
             results = []
             for b in resp.content:
                 if b.type == "tool_use":
-                    out, err = _run_tool(b.name, b.input, written)
+                    out, err = _run_tool(b.name, b.input, edits)
                     results.append({"type": "tool_result", "tool_use_id": b.id, "content": out[:20000], "is_error": err})
             messages.append({"role": "user", "content": results})
     except Exception as e:
         logger.error(f"crm_coder: agent loop failed: {e}")
-        _revert(written)
+        _restore_originals(edits)
         return f"Hit an error making that change; reverted, nothing deployed. ({e})"
 
-    if not written:
+    if not edits:
         return f"I didn't change any code.\n\n{final_text}"
 
-    ok, why = _tests_pass(written)
+    changed = list(edits)
+    ok, why = _tests_pass(changed)
     if not ok:
-        _revert(written)
+        _restore_originals(edits)
         return f"Made the change but it failed tests, so I reverted it — nothing deployed.\n\n{why}"
 
-    diff = _git("diff", "--cached", "--stat").stdout or ""
-    full_diff = _git("diff", "HEAD", "--", *written).stdout
-    pushed, err = _commit_and_push(written, request, "owner")
+    diff = _diff(edits)
+    pushed, info = await _commit_via_github(edits, f"CRM change via email: {request[:100]}\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>")
+    _restore_originals(edits)  # container fs is ephemeral; source of truth is the pushed commit
     if not pushed:
-        _revert(written)
-        return f"Change passed tests but I couldn't ship it — reverted.\n\n{err}"
+        return f"Change passed tests but I couldn't ship it — nothing deployed.\n\n{info}"
 
     return (
-        f"Done — shipped and deploying. Files: {', '.join(sorted(written))}\n\n"
-        f"{final_text}\n\n<b>Diff</b>\n<pre>{(full_diff or diff)[:6000]}</pre>"
+        f"Done — shipped commit {info}, Railway is redeploying. Files: {', '.join(changed)}\n\n"
+        f"{final_text}\n\n<b>Diff</b>\n<pre>{diff[:6000]}</pre>"
     )
