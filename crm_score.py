@@ -236,6 +236,55 @@ def opportunity_score(opp: dict, investor_count: int = 1) -> dict:
     return {"composite_score": composite, "breakdown": breakdown}
 
 
+_LP_SIGNAL_LABELS = {
+    "stage_progress": "Stage in the pipeline (how far along: New → Contacted → Engaged → … → Committed)",
+    "recency": f"Recency of last contact (100 if touched today, decaying to 0 at {RECENCY_WINDOW_DAYS} days)",
+    "engagement_depth": "Engagement depth (how many interactions, and their average importance)",
+    "deal_size": "Deal size (~$1M → 20, $5M → 60, $10M+ → 100)",
+    "sentiment_trend": "Sentiment trend of recent interactions (recency-weighted)",
+    "fund_history": "Fund history (whether enrichment found real funding-history data)",
+}
+_OPP_SIGNAL_LABELS = {
+    "stage_progress": "Stage of the deal",
+    "momentum": "Momentum (whether there's an open next step)",
+    "deal_size": "Deal size",
+    "objection_health": "Objection health (share of raised objections that are resolved)",
+    "investor_breadth": "Investor breadth (how many investors are actively engaged on it)",
+}
+
+
+def explain_methodology() -> str:
+    """Human-readable description of exactly how contacts and funds are scored, generated
+    from the live SIGNALS/OPP_SIGNALS weights so it can never drift out of sync with the
+    code. Routed to whenever the owner asks 'how do you score …'."""
+    def _pct(w: float) -> str:
+        return f"{int(round(w * 100))}%"
+
+    stages = ", ".join(f"{k} {v}" for k, v in STAGE_SCORES.items())
+    lp_lines = "\n".join(
+        f"  • {_LP_SIGNAL_LABELS.get(label, label)} — <b>{_pct(weight)}</b>"
+        for label, _fn, weight in SIGNALS
+    )
+    opp_weights = {label: weight for label, _fn, weight in OPP_SIGNALS}
+    opp_weights["investor_breadth"] = 0.15  # added dynamically in opportunity_score()
+    opp_lines = "\n".join(
+        f"  • {_OPP_SIGNAL_LABELS.get(label, label)} — <b>{_pct(weight)}</b>"
+        for label, weight in opp_weights.items()
+    )
+    return (
+        "<b>How I score</b>\n"
+        "Every contact and every fund gets a 0–100 composite: a weighted average of signals, "
+        "each scored 0–100. A signal with no data drops out entirely (it doesn't drag the score "
+        "down), so the composite is only over the signals I actually have.\n\n"
+        "<b>LP / contact score</b>\n"
+        f"{lp_lines}\n\n"
+        "<b>Fund / opportunity score</b> (this is what a fund's score is)\n"
+        f"{opp_lines}\n\n"
+        f"<b>Stage values used above:</b> {stages}.\n\n"
+        "Ask <b>score &lt;name&gt;</b> for any contact's exact composite plus the per-signal breakdown."
+    )
+
+
 def rank_active_people() -> list[dict]:
     """Every active person merged with their score — used by the radar digest and ranking views."""
     people = crm_store.list_active_people()

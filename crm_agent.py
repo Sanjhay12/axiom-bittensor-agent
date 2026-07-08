@@ -66,6 +66,13 @@ _FOCUS_RE = re.compile(
     r"|most\s+important|what'?s\s+important|what\s+to\s+do|(?:this|my)\s+week)",
     re.I,
 )
+# "how do you score …", "how are LPs scored", "scoring methodology", "explain the scoring" —
+# a question ABOUT the scoring model, not a `score <name>` lookup. Needs both a scoring word
+# and a how/explain/methodology cue, so it won't hijack "what's Jane's score".
+_SCORING_HELP_RE = re.compile(
+    r"(?=.*\bscor(?:e|es|ed|ing)\b)(?=.*\b(how|explain|methodolog|calculat|comput|derive)\b)",
+    re.I | re.S,
+)
 _OPP_RE = re.compile(r"^opportunity\s+([^:]+):\s*(.+)$", re.I)
 _UPDATE_RE = re.compile(r"^update\s+([^:]+):\s*(.+)$", re.I)
 _DONE_RE = re.compile(r"^done\s+(.+)$", re.I)
@@ -273,7 +280,7 @@ async def _handle_command(note: str) -> str | None:
         return HELP_TEXT
     if _MANUAL_RE.match(note):
         return MANUAL_TEXT
-    if _TODO_RE.match(note) or _FOCUS_RE.search(note):
+    if _TODO_RE.match(note):
         return await crm_todo.generate()
     if _PIPELINE_RE.match(note):
         return crm_ask.pipeline_summary()
@@ -402,6 +409,14 @@ async def _handle_command(note: str) -> str | None:
     if m:
         query, instruction = m.group(1).strip(), m.group(2).strip()
         return await crm_draft.generate(query, instruction or "Write a friendly check-in follow-up.")
+
+    # Fuzzy catch-alls — checked LAST, after every structured command, so a command that
+    # happens to contain a trigger word ("high priority jane@x.com" contains "priority"; an
+    # opportunity/update note may contain "this week") isn't hijacked away from its real handler.
+    if _SCORING_HELP_RE.search(note):
+        return crm_score.explain_methodology()
+    if _FOCUS_RE.search(note):
+        return await crm_todo.generate()
 
     return None
 

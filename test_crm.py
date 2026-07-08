@@ -134,7 +134,8 @@ class TestCrmImport(unittest.TestCase):
         calls = []
 
         def fake_get_or_create_firm(name):
-            return 1 if name else None
+            # Real signature returns (firm_id, is_new) — crm_import unpacks the tuple.
+            return (1, True) if name else (None, False)
 
         def fake_upsert_person(extracted, firm_id, ts, source="inbound"):
             calls.append(extracted)
@@ -144,7 +145,9 @@ class TestCrmImport(unittest.TestCase):
 
         already_exists = set()
         with patch("crm_store.get_or_create_firm", side_effect=fake_get_or_create_firm), \
-             patch("crm_store.upsert_person", side_effect=fake_upsert_person):
+             patch("crm_store.upsert_person", side_effect=fake_upsert_person), \
+             patch("crm_store.find_duplicate_by_name_and_firm", return_value=None), \
+             patch("crm_store.find_name_conflicts", return_value=[]):
             result = crm_import.import_contacts(content, filename)
         return result, calls
 
@@ -194,16 +197,20 @@ class TestCrmImport(unittest.TestCase):
     def test_on_new_person_callback_fires(self):
         rows = [{"Name": "New", "Email": "new@x.com"}]
         fired = []
-        with patch("crm_store.get_or_create_firm", return_value=None), \
-             patch("crm_store.upsert_person", return_value=(42, True)):
+        with patch("crm_store.get_or_create_firm", return_value=(None, False)), \
+             patch("crm_store.upsert_person", return_value=(42, True)), \
+             patch("crm_store.find_duplicate_by_name_and_firm", return_value=None), \
+             patch("crm_store.find_name_conflicts", return_value=[]):
             crm_import.import_contacts(_make_csv(rows), "contacts.csv", on_new_person=lambda pid, ext: fired.append(pid))
         self.assertEqual(fired, [42])
 
     def test_on_new_person_callback_not_fired_on_update(self):
         rows = [{"Name": "Existing", "Email": "old@x.com"}]
         fired = []
-        with patch("crm_store.get_or_create_firm", return_value=1), \
-             patch("crm_store.upsert_person", return_value=(7, False)):
+        with patch("crm_store.get_or_create_firm", return_value=(1, True)), \
+             patch("crm_store.upsert_person", return_value=(7, False)), \
+             patch("crm_store.find_duplicate_by_name_and_firm", return_value=None), \
+             patch("crm_store.find_name_conflicts", return_value=[]):
             crm_import.import_contacts(_make_csv(rows), "contacts.csv", on_new_person=lambda pid, ext: fired.append(pid))
         self.assertEqual(fired, [])
 
@@ -335,6 +342,13 @@ class TestCommandDispatch(unittest.IsolatedAsyncioTestCase):
 # ---------------------------------------------------------------------------
 
 class TestRadarDigest(unittest.TestCase):
+
+    def setUp(self):
+        # build_digest() reads opportunities per person; mock it so the digest tests are
+        # hermetic (no DATABASE_URL / real DB needed to run the test gate).
+        p = patch("crm_store.list_opportunities_for_people", return_value={})
+        p.start()
+        self.addCleanup(p.stop)
 
     def _make_scored_person(self, **kwargs):
         defaults = {
