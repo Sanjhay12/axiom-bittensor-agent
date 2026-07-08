@@ -69,16 +69,20 @@ def send(
         part["Content-Disposition"] = f'attachment; filename="{filename}"'
         msg.attach(part)
 
+    # Force IPv4: Railway (and many container hosts) can't route IPv6, so connecting to
+    # Gmail's IPv6 address fails with "[Errno 101] Network is unreachable". Resolve to an
+    # IPv4 address and connect there, then point the client back at the hostname so
+    # STARTTLS verifies the certificate against smtp.gmail.com, not the raw IP.
     try:
-        # Force IPv4: Railway (and many container hosts) can't route IPv6, so connecting to
-        # Gmail's IPv6 address fails with "[Errno 101] Network is unreachable". Resolve to an
-        # IPv4 address and connect there, then point the client back at the hostname so
-        # STARTTLS verifies the certificate against smtp.gmail.com, not the raw IP.
-        try:
-            ipv4 = socket.getaddrinfo(SMTP_HOST, SMTP_PORT, socket.AF_INET, socket.SOCK_STREAM)[0][4][0]
-        except (socket.gaierror, IndexError):
-            ipv4 = SMTP_HOST
-        server = smtplib.SMTP(timeout=20)
+        ipv4 = socket.getaddrinfo(SMTP_HOST, SMTP_PORT, socket.AF_INET, socket.SOCK_STREAM)[0][4][0]
+    except (socket.gaierror, IndexError):
+        ipv4 = SMTP_HOST
+
+    def _attempt() -> None:
+        # 45s (not 20s): Gmail's STARTTLS + login handshake is occasionally slow from a
+        # cold container, and a too-tight timeout was surfacing as intermittent "timed out"
+        # send failures even though the reply was fully computed.
+        server = smtplib.SMTP(timeout=45)
         try:
             server.connect(ipv4, SMTP_PORT)
             server._host = SMTP_HOST
@@ -90,14 +94,25 @@ def send(
                 server.quit()
             except Exception:
                 pass
-        import crm_store
-        crm_store.log_event("reply_sent", {"to": recipient, "subject": subject})
-        return message_id
-    except Exception as e:
-        logger.error(f"crm_mail: send failed: {e}")
-        import crm_store
-        crm_store.log_event("reply_failed", {"subject": subject, "error": str(e)})
-        return None
+
+    import crm_store
+    last_err: Exception | None = None
+    # Retry transient network/timeout failures a couple of times before giving up — a
+    # single dropped handshake shouldn't silently lose a reply the agent already produced.
+    for attempt in range(1, 4):
+        try:
+            _attempt()
+            crm_store.log_event("reply_sent", {"to": recipient, "subject": subject})
+            return message_id
+        except Exception as e:
+            last_err = e
+            logger.warning(f"crm_mail: send attempt {attempt}/3 failed: {e}")
+            if attempt < 3:
+                import time
+                time.sleep(2 * attempt)
+    logger.error(f"crm_mail: send failed after retries: {last_err}")
+    crm_store.log_event("reply_failed", {"subject": subject, "error": str(last_err)})
+    return None
 
 
 async def send_async(
