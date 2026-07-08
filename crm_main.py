@@ -29,10 +29,17 @@ def _boot_diagnostics():
     except Exception:
         commit = "unknown"
     sec = crm_coder.CODE_SECRET or ""
+    mail_transport = (
+        "resend" if crm_mail.RESEND_API_KEY
+        else "smtp (LOCAL FALLBACK — will time out on Railway!)" if crm_mail.SMTP_HOST
+        else "NONE (no RESEND_API_KEY!)"
+    )
     logging.getLogger("crm_main").info(
-        "crm boot: commit=%s | owners=%s | code_changes=%s (secret_len=%d clean=%s) | github_token=%s",
+        "crm boot: commit=%s | owners=%s | mail=%s from=%s | code_changes=%s (secret_len=%d clean=%s) | github_token=%s",
         commit,
         crm_mail.OWNER_EMAILS or "(none!)",
+        mail_transport,
+        crm_mail.FROM_EMAIL or "(none!)",
         "ENABLED" if crm_coder.CODE_SECRET else "DISABLED (CRM_CODE_SECRET not set)",
         len(sec),
         sec == sec.strip() and sec != "",
