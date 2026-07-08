@@ -167,9 +167,7 @@ def build_digest() -> str | None:
         lines.append("")
 
     body = "\n".join(lines).strip()
-    if body:
-        body += "\n\n— CRM agent"
-    return body
+    return body or None
 
 
 async def send_digest():
