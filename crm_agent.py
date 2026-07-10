@@ -30,6 +30,7 @@ import crm_mailbox
 import crm_parser
 import crm_pdf
 import crm_radar
+import crm_roadshow
 import crm_score
 import crm_status
 import crm_store
@@ -84,6 +85,13 @@ _STATUS_RE = re.compile(
     r"^(?:status(?:\s+report)?|fund\s+status|(?:manager|raise)\s+(?:status\s+)?report)"
     r"(?:\s*:\s*(\d+)\s*d(?:ays)?)?\s*$", re.I,
 )
+# Roadshow: "roadshow LA" / "road show New York: Nebari". The `draft` form must be
+# tried first so "draft roadshow LA" doesn't match the plain roadshow verb (or the
+# generic `draft <contact>` command). Owner-only.
+_DRAFT_ROADSHOW_RE = re.compile(r"^draft\s+road\s?show\s+([^:]+?)(?::\s*(.+))?\s*$", re.I)
+_ROADSHOW_RE = re.compile(r"^road\s?show\s+([^:]+?)(?::\s*(.+))?\s*$", re.I)
+# Manual location tag: "set location Fairbridge: Los Angeles" (firm or contact). Owner-only.
+_LOCATION_RE = re.compile(r"^(?:set\s+|tag\s+)?location\s+([^:]+):\s*(.+)$", re.I)
 
 HELP_TEXT = """<b>Cedar Ridge Inbox Agent — commands</b>
 
@@ -98,6 +106,8 @@ You can email any of these, or just forward/BCC a relationship email and it gets
 <b>brief &lt;name or email&gt;: &lt;product&gt;</b> — same, scoped to one specific opportunity's stage/notes/objections instead of the whole relationship
 <b>report</b> (or <b>report: 7 days</b>) — CRM activity report PDF with charts: interaction volume, meetings/calls, pipeline stage distribution, prospective transactions. Defaults to trailing 30 days.
 <b>status</b> (or <b>status report</b> / <b>fund status</b>) — owner-only executive one-pager for your manager/fund on Cedar Ridge letterhead: where the raise stands, pipeline funnel charts, top prospects, investor feedback, and next steps. Defaults to trailing 30 days.
+<b>roadshow &lt;city&gt;</b> (or <b>roadshow &lt;city&gt;: &lt;product&gt;</b>) — owner-only trip planner: who to meet in a city, tiered into anchors (warm, meet in person), meeting candidates, and prospects just outside the city worth traveling for. E.g. "roadshow LA: Nebari". Then <b>draft roadshow &lt;city&gt;</b> generates copy-paste meeting-request emails for them.
+<b>set location &lt;firm or contact&gt;: &lt;city&gt;</b> — tag where an investor is based (e.g. "set location Fairbridge: Los Angeles"), used by roadshow. Locations are also inferred automatically, but your tags win.
 <b>draft &lt;name or email&gt;: &lt;instruction&gt;</b> — draft a reply for your review (never auto-sent)
 <b>who is in &lt;stage&gt;</b> — e.g. "who is in diligence", "who's in engaged"
 <b>high priority &lt;name or email&gt;</b> — always flag this contact in the daily digest
@@ -524,6 +534,27 @@ async def _send_status_report(msg: dict, days: int = 30):
         )
 
 
+def _do_set_location(query: str, location: str) -> str:
+    """Manual location tag. Prefers the firm (a city usually applies to the whole firm),
+    falling back to a specific contact, and creating a bare firm if neither exists yet.
+    Manual tags are authoritative — cached LLM inference never overwrites them."""
+    query, location = query.strip().rstrip("?.,!"), location.strip()
+    firm = crm_store.find_firm_by_name(query)
+    if firm:
+        crm_store.set_firm_location(firm["id"], location, source="manual")
+        return f"Tagged <b>{firm['name']}</b> as based in <b>{location}</b>."
+    person = crm_store.find_person(query)
+    if person:
+        crm_store.set_person_location(person["id"], location, source="manual")
+        name = person.get("name") or person["email"]
+        return f"Tagged <b>{name}</b> as based in <b>{location}</b>."
+    firm_id, _ = crm_store.get_or_create_firm(query)
+    if firm_id is None:
+        return f"Couldn't find or create a firm/contact for '{query}'."
+    crm_store.set_firm_location(firm_id, location, source="manual")
+    return f"Created firm <b>{query}</b> and tagged it as based in <b>{location}</b>."
+
+
 def _fmt_usd_short(amount: float | None) -> str:
     if not amount:
         return "$0"
@@ -532,6 +563,14 @@ def _fmt_usd_short(amount: float | None) -> str:
     if amount >= 1_000:
         return f"${amount/1_000:.0f}K"
     return f"${amount:,.0f}"
+
+
+async def _reply_text(msg: dict, sender: str, reply: str):
+    """Send a plain text reply back to the sender, threaded on the original message."""
+    await crm_mail.send_async(
+        f"Re: {msg.get('subject') or 'your note'}", reply,
+        in_reply_to=msg.get("message_id"), to=sender,
+    )
 
 
 async def _reply_to_note(msg: dict, note: str):
@@ -565,6 +604,29 @@ async def _reply_to_note(msg: dict, note: str):
         days = int(m.group(1)) if m.group(1) else 30
         await _send_status_report(msg, days)
         return
+
+    # Roadshow + manual location tag are owner-only internal planning tools. The `draft`
+    # form is matched before the plain roadshow verb (and before the generic draft command).
+    for _rs_re, _rs_fn in ((_DRAFT_ROADSHOW_RE, crm_roadshow.draft_emails),
+                           (_ROADSHOW_RE, crm_roadshow.roadshow)):
+        m = _rs_re.match(note.strip())
+        if m:
+            if not from_owner:
+                await _reply_text(msg, sender, "Roadshow planning is available to the account owner only.")
+                return
+            city = m.group(1).strip().rstrip("?.,!")
+            product = m.group(2).strip().rstrip("?.,!") if m.group(2) else None
+            await _reply_text(msg, sender, await _rs_fn(city, product))
+            return
+
+    m = _LOCATION_RE.match(note.strip())
+    if m:
+        if not from_owner:
+            await _reply_text(msg, sender, "Tagging locations is available to the account owner only.")
+            return
+        await _reply_text(msg, sender, _do_set_location(m.group(1), m.group(2)))
+        return
+
     try:
         # Level 3: a code-change request (carries the shared secret) is handled exclusively.
         reply = await crm_coder.try_code_command(note, from_owner, msg.get("body") or note)
@@ -582,7 +644,27 @@ async def _reply_to_note(msg: dict, note: str):
                 if action["action"] == "brief_request":
                     await _send_brief(msg, action["contact"], action.get("product"))
                     return
-                reply = await _dispatch_action(action)
+                # Freeform routes to the same owner-only planning tools as the explicit commands.
+                if action["action"] == "status_report":
+                    if not from_owner:
+                        await _reply_text(msg, sender, "The status report is available to the account owner only.")
+                        return
+                    await _send_status_report(msg)
+                    return
+                if action["action"] == "roadshow":
+                    if not from_owner:
+                        await _reply_text(msg, sender, "Roadshow planning is available to the account owner only.")
+                        return
+                    await _reply_text(msg, sender, await crm_roadshow.roadshow(
+                        (action.get("city") or "").strip(), (action.get("product") or "").strip() or None))
+                    return
+                if action["action"] == "set_location":
+                    if not from_owner:
+                        await _reply_text(msg, sender, "Tagging locations is available to the account owner only.")
+                        return
+                    reply = _do_set_location(action.get("contact") or "", action.get("location") or "")
+                else:
+                    reply = await _dispatch_action(action)
         if reply is None:
             reply = await crm_config.try_config_command(note, from_owner)
         if reply is None:

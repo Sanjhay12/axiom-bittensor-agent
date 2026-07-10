@@ -794,13 +794,26 @@ elsewhere and should return null here.
 - "brief_request": asking to prepare for an upcoming call/meeting, OR asking for a brief/overview
   on a fund/firm that may not have any contact on file yet — a prospective LP's fund can still get
   a cold research-based brief (e.g. "prep me for my call with Jane", "brief me on Acme Capital").
+- "roadshow": planning which investors to meet in a specific city/area or on an upcoming trip —
+  NOT about one named contact (e.g. "I'm heading to LA with Nebari, who should I meet?", "who
+  should I see when I'm in New York?", "plan my Boston trip"). Put the city in "city" and, if a
+  fund/product is named, put it in "product". Leave "contact" null.
+- "status_report": asking for an overall fundraising STATUS / progress summary to share with his
+  manager or a fund — where the whole raise stands, not one contact (e.g. "give me a status update
+  for the fund", "how's the raise going", "something I can send my manager on where we're at").
+  Leave "contact" null.
+- "set_location": stating or tagging where a contact or firm is BASED / located (e.g. "Fairbridge
+  is based in Los Angeles", "mark Robert O'Connor as New York", "Acorn is in Chicago"). Put the
+  firm or person in "contact" and the city in "location".
 
 Return ONLY valid JSON:
 {
-  "action": "mark_done" | "set_priority" | "unset_priority" | "confirm_stage" | "reject_stage" | "score_query" | "draft_request" | "enrich_request" | "brief_request" | null,
-  "contact": "the exact name, email, or firm mentioned",
-  "product": "for brief_request only — a specific product/deal name if mentioned, else null",
-  "instruction": "for draft_request only — what the draft should say, else null"
+  "action": "mark_done" | "set_priority" | "unset_priority" | "confirm_stage" | "reject_stage" | "score_query" | "draft_request" | "enrich_request" | "brief_request" | "roadshow" | "status_report" | "set_location" | null,
+  "contact": "the exact name, email, or firm mentioned (null for roadshow / status_report)",
+  "product": "for brief_request or roadshow — a specific product/deal name if mentioned, else null",
+  "instruction": "for draft_request only — what the draft should say, else null",
+  "city": "for roadshow only — the city/area to plan around, else null",
+  "location": "for set_location only — the city where the contact/firm is based, else null"
 }
 
 If none of these actions apply, return {"action": null}.
@@ -825,6 +838,13 @@ async def try_action_command(note: str) -> dict | None:
         data = json.loads(text)
     except json.JSONDecodeError:
         return None
-    if not data.get("action") or not (data.get("contact") or "").strip():
+    if not data.get("action"):
+        return None
+    # roadshow / status_report are not contact-scoped; roadshow still needs a city.
+    if data["action"] in ("roadshow", "status_report"):
+        if data["action"] == "roadshow" and not (data.get("city") or "").strip():
+            return None
+        return data
+    if not (data.get("contact") or "").strip():
         return None
     return data

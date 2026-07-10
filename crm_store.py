@@ -28,6 +28,12 @@ def init_crm_db():
             # that has no contact on file yet — a fund manager researching a prospective
             # LP's fund shouldn't need an actual person record first.
             cur.execute("ALTER TABLE crm_firms ADD COLUMN IF NOT EXISTS enrichment TEXT")
+            # City / metro for roadshow geographic targeting. Populated three ways:
+            # a manual owner tag, on-the-fly LLM inference (cached here), or firm research.
+            cur.execute("ALTER TABLE crm_firms ADD COLUMN IF NOT EXISTS location TEXT")
+            # 'manual' once the owner tags it, so cached LLM inference never overwrites a
+            # human-confirmed location; 'inferred' when Claude guessed it.
+            cur.execute("ALTER TABLE crm_firms ADD COLUMN IF NOT EXISTS location_source TEXT")
 
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS crm_people (
@@ -60,6 +66,10 @@ def init_crm_db():
             # relationship context
             cur.execute("ALTER TABLE crm_people ADD COLUMN IF NOT EXISTS investor_type TEXT")
             cur.execute("ALTER TABLE crm_people ADD COLUMN IF NOT EXISTS how_met TEXT")
+            # Contact's own city, when it differs from their firm HQ (e.g. a partner who
+            # runs the West Coast office). Overrides firm location for roadshow targeting.
+            cur.execute("ALTER TABLE crm_people ADD COLUMN IF NOT EXISTS location TEXT")
+            cur.execute("ALTER TABLE crm_people ADD COLUMN IF NOT EXISTS location_source TEXT")
             cur.execute("ALTER TABLE crm_people ADD COLUMN IF NOT EXISTS introduced_by TEXT")
             cur.execute("ALTER TABLE crm_people ADD COLUMN IF NOT EXISTS personal_notes TEXT")
             # warmth
@@ -903,6 +913,33 @@ def set_firm_enrichment(firm_id: int, data: dict):
             cur.execute(
                 "UPDATE crm_firms SET enrichment = %s WHERE id = %s",
                 (json.dumps(data), firm_id),
+            )
+
+
+def set_firm_location(firm_id: int, location: str, source: str = "manual"):
+    """source='manual' (owner tag) or 'inferred' (cached LLM guess). Inferred writes
+    never clobber a manual tag — a human-confirmed city is authoritative."""
+    with store.get_conn() as conn:
+        with conn.cursor() as cur:
+            if source == "inferred":
+                cur.execute(
+                    "UPDATE crm_firms SET location = %s, location_source = %s "
+                    "WHERE id = %s AND (location IS NULL OR location_source IS DISTINCT FROM 'manual')",
+                    (location, source, firm_id),
+                )
+            else:
+                cur.execute(
+                    "UPDATE crm_firms SET location = %s, location_source = %s WHERE id = %s",
+                    (location, source, firm_id),
+                )
+
+
+def set_person_location(person_id: int, location: str, source: str = "manual"):
+    with store.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE crm_people SET location = %s, location_source = %s, updated_at = %s WHERE id = %s",
+                (location, source, int(time.time()), person_id),
             )
 
 
