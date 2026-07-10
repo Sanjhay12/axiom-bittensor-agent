@@ -31,6 +31,7 @@ import crm_parser
 import crm_pdf
 import crm_radar
 import crm_score
+import crm_status
 import crm_store
 import crm_todo
 import crm_voice
@@ -77,6 +78,12 @@ _OPP_RE = re.compile(r"^opportunity\s+([^:]+):\s*(.+)$", re.I)
 _UPDATE_RE = re.compile(r"^update\s+([^:]+):\s*(.+)$", re.I)
 _DONE_RE = re.compile(r"^done\s+(.+)$", re.I)
 _REPORT_RE = re.compile(r"^(?:crm\s+)?report(?:\s*:\s*(\d+)\s*d(?:ays)?)?\s*$", re.I)
+# Owner-only executive status one-pager (crm_status): "status", "status report",
+# "fund status", "manager report", optional ": 30 days" window like `report`.
+_STATUS_RE = re.compile(
+    r"^(?:status(?:\s+report)?|fund\s+status|(?:manager|raise)\s+(?:status\s+)?report)"
+    r"(?:\s*:\s*(\d+)\s*d(?:ays)?)?\s*$", re.I,
+)
 
 HELP_TEXT = """<b>Cedar Ridge Inbox Agent — commands</b>
 
@@ -90,6 +97,7 @@ You can email any of these, or just forward/BCC a relationship email and it gets
 <b>brief &lt;name or email&gt;</b> — one-page pre-call brief (Cedar Ridge letterhead PDF, plus plain text)
 <b>brief &lt;name or email&gt;: &lt;product&gt;</b> — same, scoped to one specific opportunity's stage/notes/objections instead of the whole relationship
 <b>report</b> (or <b>report: 7 days</b>) — CRM activity report PDF with charts: interaction volume, meetings/calls, pipeline stage distribution, prospective transactions. Defaults to trailing 30 days.
+<b>status</b> (or <b>status report</b> / <b>fund status</b>) — owner-only executive one-pager for your manager/fund on Cedar Ridge letterhead: where the raise stands, pipeline funnel charts, top prospects, investor feedback, and next steps. Defaults to trailing 30 days.
 <b>draft &lt;name or email&gt;: &lt;instruction&gt;</b> — draft a reply for your review (never auto-sent)
 <b>who is in &lt;stage&gt;</b> — e.g. "who is in diligence", "who's in engaged"
 <b>high priority &lt;name or email&gt;</b> — always flag this contact in the daily digest
@@ -485,6 +493,37 @@ async def _send_report(msg: dict, days: int = 30):
         )
 
 
+async def _send_status_report(msg: dict, days: int = 30):
+    """Capital-raise status one-pager (crm_status) — where the raise stands, pipeline
+    funnel, top prospects, investor feedback, next steps — as a Cedar Ridge letterhead
+    PDF for Joe's manager/fund. Owner-only (gated by the caller)."""
+    try:
+        data, narrative_text = await crm_status.generate(days=days)
+        pdf_bytes = crm_pdf.generate_status_pdf(data, narrative_text)
+        summary = (
+            f"Status report attached — trailing {days} days.\n"
+            f"{data['active_count']} active relationships, "
+            f"{data['pipeline_count']} active opportunities, "
+            f"{data['new_count']} sourced (not yet worked).\n\n"
+            f"{narrative_text}"
+        )
+        await crm_mail.send_async(
+            f"Re: {msg.get('subject') or 'status report'}",
+            summary,
+            in_reply_to=msg.get("message_id"),
+            attachment=("Cedar Ridge Capital Raise - Status Report.pdf", pdf_bytes),
+        )
+    except Exception as e:
+        logger.error(f"crm_agent: status report generation failed: {e}")
+        crm_store.log_event("error", {
+            "module": "crm_agent._send_status_report", "error": str(e), "traceback": traceback.format_exc(),
+        })
+        await crm_mail.send_async(
+            f"Re: {msg.get('subject') or 'status report'}", f"Hit an error generating that status report: {e}",
+            in_reply_to=msg.get("message_id"),
+        )
+
+
 def _fmt_usd_short(amount: float | None) -> str:
     if not amount:
         return "$0"
@@ -511,6 +550,21 @@ async def _reply_to_note(msg: dict, note: str):
 
     sender = parseaddr(msg.get("from") or "")[1]
     from_owner = crm_mail.is_owner(sender)
+
+    m = _STATUS_RE.match(note.strip())
+    if m:
+        # Owner-only: the status one-pager is an internal report for Joe's manager/fund,
+        # not something a forwarded contact or LP should be able to pull.
+        if not from_owner:
+            await crm_mail.send_async(
+                f"Re: {msg.get('subject') or 'status'}",
+                "The status report is available to the account owner only.",
+                in_reply_to=msg.get("message_id"), to=sender,
+            )
+            return
+        days = int(m.group(1)) if m.group(1) else 30
+        await _send_status_report(msg, days)
+        return
     try:
         # Level 3: a code-change request (carries the shared secret) is handled exclusively.
         reply = await crm_coder.try_code_command(note, from_owner, msg.get("body") or note)

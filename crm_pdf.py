@@ -14,7 +14,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 from reportlab.lib.colors import HexColor, black
 from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_JUSTIFY
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.graphics.shapes import Drawing, String, Rect
 
@@ -168,6 +168,147 @@ def _make_table(rows: list[list], col_widths: list[float], styles: dict, header:
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
     ]))
     return t
+
+
+_STATUS_SECTION_RE = re.compile(r'^\s*<b>\s*(.+?)\s*</b>\s*$')
+
+
+def _render_narrative(story, text: str, styles: dict):
+    """Renders crm_status.narrative output: lines wrapped in <b>..</b> become bold
+    section headers, '-' lines become bullets, everything else flows as body. Uses a
+    compact 9pt style (vs the 10pt brief body) so the where-we-are / feedback / next
+    prose keeps the whole report on one page."""
+    head = ParagraphStyle("NarrHead", fontName="Times-Bold", fontSize=9.5, textColor=black,
+                          leading=12, spaceBefore=4, spaceAfter=1)
+    body = ParagraphStyle("NarrBody", fontName="Times-Roman", fontSize=9, textColor=black,
+                          leading=11.5, alignment=TA_JUSTIFY, spaceAfter=2)
+    bullet_style = ParagraphStyle("NarrBullet", parent=body, leftIndent=10, spaceAfter=1)
+    for raw in (text or "").split("\n"):
+        line = raw.strip()
+        if not line:
+            continue
+        m = _STATUS_SECTION_RE.match(line)
+        if m:
+            story.append(Paragraph(f"<b>{_esc(m.group(1))}</b>", head))
+            continue
+        bullet = line.startswith("-")
+        content = line[1:].strip() if bullet else line
+        story.append(Paragraph(("&bull; " if bullet else "") + _esc(content),
+                               bullet_style if bullet else body))
+
+
+def _nonzero_stage_data(counts: dict, order: list, exclude: tuple = ()) -> list[tuple[str, float]]:
+    return [(s, counts[s]) for s in order if s in counts and counts[s] and s not in exclude]
+
+
+# Contact/deal pipeline order for the status one-pager. New is cold top-of-funnel
+# (bulk import) and is reported as a headline metric, not plotted, so it doesn't
+# dwarf every worked stage.
+_STATUS_STAGE_ORDER = [
+    "New", "Contacted", "Engaged", "Intro made", "Materials sent",
+    "Call scheduled", "Diligence", "Soft circled", "Committed", "Passed", "Dormant",
+]
+
+
+def _kpi_strip(kpis: list[tuple[str, str]]) -> Table:
+    """One row of value-over-label cells — a compact executive metric strip."""
+    val_style = ParagraphStyle("KpiVal", fontName="Times-Bold", fontSize=15, textColor=black,
+                               leading=17, alignment=TA_CENTER)
+    lbl_style = ParagraphStyle("KpiLbl", fontName="Times-Roman", fontSize=7.5, textColor=GREY,
+                               leading=9, alignment=TA_CENTER)
+    cells = [[Paragraph(_esc(v), val_style), Paragraph(_esc(l), lbl_style)] for v, l in kpis]
+    col_w = (PAGE_W - 2 * MARGIN) / len(kpis)
+    # Each KPI is its own 2-row inner table so value stacks above label; outer table lays them across.
+    inner = [Table([[c[0]], [c[1]]], colWidths=[col_w]) for c in cells]
+    for t in inner:
+        t.setStyle(TableStyle([
+            ("LEFTPADDING", (0, 0), (-1, -1), 2), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+            ("TOPPADDING", (0, 0), (-1, -1), 1), ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+        ]))
+    outer = Table([inner], colWidths=[col_w] * len(kpis))
+    outer.setStyle(TableStyle([
+        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.75, GREY),
+        ("LINEABOVE", (0, 0), (-1, -1), 0.75, GREY),
+    ]))
+    return outer
+
+
+def generate_status_pdf(data: dict, narrative_text: str, date_str: str | None = None) -> bytes:
+    """Capital-raise status one-pager (crm_status.generate output) on Cedar Ridge
+    letterhead: overview strip, pipeline funnel + opportunity-stage charts, top
+    prospects table, and the synthesized where-we-are / feedback / next-steps prose."""
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=MARGIN, rightMargin=MARGIN, topMargin=MARGIN, bottomMargin=MARGIN + 1.2 * cm,
+        title="Cedar Ridge Capital Raise — Status Report", author="Cedar Ridge Capital",
+    )
+    styles = _styles()
+    date_str = date_str or datetime.now().strftime("%B %Y")
+    w = PAGE_W - 2 * MARGIN
+    story = []
+
+    _build_header(story, styles, date_str)
+    story.append(Paragraph("Cedar Ridge Capital", styles["title"]))
+    story.append(Spacer(1, 2))
+    story.append(Paragraph("Capital Raise &mdash; Status Report", styles["header_meta"]))
+    story.append(Spacer(1, 10))
+
+    # Overview: a compact horizontal KPI strip (one row of value-over-label cells)
+    # rather than a tall table, to keep the whole report on a single page.
+    pipeline_usd = data.get("pipeline_total_usd") or 0
+    kpis = [
+        (f"{data.get('active_count', 0):,}", "Active relationships"),
+        (f"{data.get('new_count', 0):,}", "Sourced (not worked)"),
+        (f"{data.get('pipeline_count', 0):,}", "Active opportunities"),
+        (f"{data.get('total_interactions', 0):,}", f"Interactions ({data.get('days', 30)}d)"),
+        (_fmt_usd(pipeline_usd) if pipeline_usd else "—", "Logged pipeline $"),
+    ]
+    story.append(_kpi_strip(kpis))
+    story.append(Spacer(1, 8))
+
+    # Charts: contacts by stage + active opportunities by stage
+    funnel = data.get("funnel") or []
+    opp_data = _nonzero_stage_data(
+        data.get("opp_stage_counts", {}), _STATUS_STAGE_ORDER, exclude=("New", "Passed", "Dormant"),
+    )
+    contacts_chart = _make_bar_chart(funnel, "Contacts by Pipeline Stage", height=125)
+    opps_chart = _make_bar_chart(opp_data, "Active Opportunities by Stage", height=125)
+    charts = [c for c in (contacts_chart, opps_chart) if c]
+    if charts:
+        story.append(Paragraph("<b>Pipeline</b>", styles["body"]))
+        story.append(Spacer(1, 2))
+        story.append(_side_by_side(charts, styles))
+        story.append(Spacer(1, 6))
+
+    # Top prospects (cap the rows shown so the report stays one page; label the shown count)
+    prospects = (data.get("top_prospects") or [])[:5]
+    story.append(Paragraph(f"<b>Top Prospects ({len(prospects)})</b>", styles["body"]))
+    story.append(Spacer(1, 2))
+    if prospects:
+        rows = [["Prospect", "Firm", "Stage", "Score", "Next Step"]]
+        for p in prospects:
+            score = p.get("composite_score")
+            rows.append([
+                p.get("name") or p.get("email") or "—",
+                p.get("firm_name") or "—",
+                p.get("stage") or "New",
+                f"{score:.0f}" if score else "—",
+                (p.get("next_step_display") or p.get("next_step") or "—")[:48],
+            ])
+        story.append(_make_table(rows, [w * 0.22, w * 0.24, w * 0.14, w * 0.08, w * 0.32], styles))
+    else:
+        story.append(Paragraph("No worked prospects on file yet.", styles["body_list"]))
+    story.append(Spacer(1, 6))
+
+    # Narrative: where we are / feedback / next steps
+    _render_narrative(story, narrative_text, styles)
+
+    doc.build(story, onFirstPage=_draw_brief_footer, onLaterPages=_draw_brief_footer)
+    return buf.getvalue()
 
 
 def generate_dashboard_pdf(data: dict, date_str: str | None = None) -> bytes:
