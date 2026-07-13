@@ -91,12 +91,15 @@ async def _infer_and_cache_locations(candidates: list[dict]) -> None:
 
     firm_list = "\n".join(f"- {name}" for name in missing.values())
     prompt = (
-        "For each investment firm / fund / family office below, give its PRIMARY "
-        "headquarters city. Use real, known locations only — if you are not reasonably "
-        "sure, return \"unknown\" for that firm rather than guessing.\n\n"
+        "For each investment firm / fund / family office below, give your BEST GUESS at its "
+        "primary headquarters city. These are real firms a fundraiser deals with, so give a "
+        "concrete city whenever you have any reasonable basis for one (the firm name, its known "
+        "reputation, common domiciles for its strategy). Only return \"unknown\" if you truly "
+        "have no basis at all. The guess is cached as inferred and the user can correct it, so "
+        "prefer a plausible city over \"unknown\".\n\n"
         f"{firm_list}\n\n"
         "Return ONLY a JSON object mapping each firm name exactly as written to a string "
-        "like \"Los Angeles, CA\", \"London, UK\", or \"unknown\". No prose."
+        "like \"Los Angeles, CA\", \"New York, NY\", \"London, UK\", or \"unknown\". No prose."
     )
     try:
         resp = await claude.messages.create(
@@ -171,12 +174,16 @@ async def plan(city: str, product: str | None = None) -> dict:
     now = int(_time.time())
     candidates = _gather_candidates()
     result = {"city": city, "product": product, "anchors": [], "candidates": [],
-              "travel_worth": [], "summary": "", "candidate_count": len(candidates)}
+              "travel_worth": [], "fallback": [], "summary": "", "candidate_count": len(candidates)}
     if not candidates:
         result["summary"] = "No worked or qualified contacts on file yet to plan a trip around."
         return result
 
     await _infer_and_cache_locations(candidates)
+    # Always compute a product-relevant target list as a fallback: if geo tiering finds nobody
+    # in the city (thin/missing location data), the user still gets the investors to focus on
+    # rather than a dead-end "no contacts" — see format_plan.
+    result["fallback"] = _fallback_list(candidates, product, now)
 
     scope = f"\nProduct/fund in focus: {product}" if product else ""
     user = (
@@ -202,6 +209,31 @@ async def plan(city: str, product: str | None = None) -> dict:
     return result
 
 
+def _fallback_list(candidates: list[dict], product: str | None, now: int) -> list[dict]:
+    """Product-relevant target list used when geo tiering places nobody in the city. Prefers
+    contacts whose products/liked-products/mandate mention the product; else the top qualified
+    contacts. Ranked by importance then interaction depth."""
+    prod = (product or "").lower().strip()
+    prod_head = prod.split()[0] if prod else ""
+
+    def relevant(r: dict) -> bool:
+        if not prod:
+            return False
+        blob = " ".join(str(r.get(k) or "") for k in ("products", "liked_products", "mandate")).lower()
+        return prod in blob or (prod_head and prod_head in blob)
+
+    matched = [r for r in candidates if relevant(r)]
+    pool = matched or candidates
+    pool = sorted(pool, key=lambda r: (r.get("importance") or 0, r.get("interaction_count") or 0), reverse=True)
+    return [{
+        "name": r.get("name") or r.get("email"),
+        "firm": r.get("firm_name"),
+        "location": _effective_location(r) or "location unconfirmed",
+        "stage": r.get("stage"),
+        "product_fit": relevant(r),
+    } for r in pool[:12]]
+
+
 def _fmt_person(p: dict) -> str:
     loc = f" — {p['location']}" if p.get("location") else ""
     firm = f" ({p['firm']})" if p.get("firm") else ""
@@ -218,12 +250,34 @@ def format_plan(p: dict) -> str:
     scope = f" with {p['product']}" if p.get("product") else ""
     n = len(p["anchors"]) + len(p["candidates"]) + len(p["travel_worth"])
     if n == 0:
-        return (
-            f"<b>Roadshow — {city}{scope}</b>\n\n"
-            f"{p.get('summary') or 'No contacts are a geographic fit for this trip yet.'}\n\n"
-            "Tag locations as you learn them — e.g. email \"set location Fairbridge: Los Angeles\" — "
-            "and this will fill in."
+        fb = p.get("fallback") or []
+        if not fb:
+            return (
+                f"<b>Roadshow — {city}{scope}</b>\n\n"
+                "No worked or qualified investors on file yet to build a target list from."
+            )
+        # No geographic matches (usually thin location data) — give the product-relevant target
+        # list anyway rather than dead-ending, and tell them how to sharpen it into an itinerary.
+        prod = p.get("product")
+        out = [
+            f"<b>Roadshow — {city}{scope}</b>",
+            f"I couldn't confirm any of your investors are based in {city} yet"
+            + (" (locations aren't all tagged)." if any(x["location"] == "location unconfirmed" for x in fb)
+               else " — your worked investors look concentrated elsewhere."),
+            f"\n<b>Target list — {prod + '-relevant ' if prod else ''}investors to focus on ({len(fb)})</b>",
+        ]
+        for x in fb:
+            firmp = f" ({x['firm']})" if x.get("firm") else ""
+            loc = f" — {x['location']}" if x.get("location") else ""
+            st = f" · {x['stage']}" if x.get("stage") else ""
+            star = "  ★ fits" if x.get("product_fit") else ""
+            out.append(f"&bull; <b>{x['name']}</b>{firmp}{loc}{st}{star}")
+        out.append(
+            f"\nRanked by priority. Tag where they're based — e.g. \"set location Nebari Partners: "
+            f"New York\" — and I'll sort them into a {city} itinerary (anchors / candidates / worth "
+            f"traveling for) and draft the meeting emails."
         )
+        return "\n".join(x for x in out if x)
     out = [f"<b>Roadshow — {city}{scope}</b>", p.get("summary", "")]
     if p["anchors"]:
         out.append(f"\n<b>Anchors — meet these ({len(p['anchors'])})</b>")
@@ -235,7 +289,11 @@ def format_plan(p: dict) -> str:
         out.append(f"\n<b>Worth traveling for — just outside {city} ({len(p['travel_worth'])})</b>")
         out += [_fmt_person(x) for x in p["travel_worth"]]
     out.append(
-        f"\nReply <b>draft roadshow {city}{scope}</b> to get copy-paste meeting-request "
+        "\n<i>Locations are best-guess inferences unless you've tagged them — confirm before "
+        "booking, and correct any with e.g. \"set location Banner Ridge: New York\".</i>"
+    )
+    out.append(
+        f"Reply <b>draft roadshow {city}{scope}</b> to get copy-paste meeting-request "
         "emails for the anchors and candidates."
     )
     return "\n".join(x for x in out if x)

@@ -90,6 +90,9 @@ _STATUS_RE = re.compile(
 # generic `draft <contact>` command). Owner-only.
 _DRAFT_ROADSHOW_RE = re.compile(r"^draft\s+road\s?show\s+([^:]+?)(?::\s*(.+))?\s*$", re.I)
 _ROADSHOW_RE = re.compile(r"^road\s?show\s+([^:]+?)(?::\s*(.+))?\s*$", re.I)
+# A note mentioning a roadshow / trip target list, so the fuzzy focus/priority catch-all in
+# _handle_command doesn't hijack "the investors we should focus on for the roadshow" into the todo.
+_ROADSHOW_HINT_RE = re.compile(r"road\s?show|target list|who\s+(?:should|do)\s+i\s+(?:meet|see)|trip\s+to", re.I)
 # Manual location tag: "set location Fairbridge: Los Angeles" (firm or contact). Owner-only.
 _LOCATION_RE = re.compile(r"^(?:set\s+|tag\s+)?location\s+([^:]+):\s*(.+)$", re.I)
 
@@ -433,7 +436,10 @@ async def _handle_command(note: str) -> str | None:
     # opportunity/update note may contain "this week") isn't hijacked away from its real handler.
     if _SCORING_HELP_RE.search(note):
         return crm_score.explain_methodology()
-    if _FOCUS_RE.search(note):
+    # ...but a roadshow ask often contains focus/priority words ("investors we should FOCUS ON
+    # for the roadshow", "top targets") — let those fall through to the roadshow classifier
+    # instead of being hijacked into the to-do dashboard.
+    if _FOCUS_RE.search(note) and not _ROADSHOW_HINT_RE.search(note):
         return await crm_todo.generate()
 
     return None
