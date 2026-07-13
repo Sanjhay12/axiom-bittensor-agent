@@ -797,7 +797,9 @@ elsewhere and should return null here.
 - "roadshow": planning which investors to meet in a specific city/area or on an upcoming trip —
   NOT about one named contact (e.g. "I'm heading to LA with Nebari, who should I meet?", "who
   should I see when I'm in New York?", "plan my Boston trip"). Put the city in "city" and, if a
-  fund/product is named, put it in "product". Leave "contact" null.
+  fund/product is named, put it in "product". Leave "contact" null. Set "wants_drafts" true ONLY
+  if they're asking for the outreach/meeting EMAILS to be drafted (e.g. "draft the emails for my
+  LA roadshow", "write outreach notes for the SF trip"); a plain "who should I meet" is false.
 - "status_report": asking for an overall fundraising STATUS / progress summary to share with his
   manager or a fund — where the whole raise stands, not one contact (e.g. "give me a status update
   for the fund", "how's the raise going", "something I can send my manager on where we're at").
@@ -813,6 +815,7 @@ Return ONLY valid JSON:
   "product": "for brief_request or roadshow — a specific product/deal name if mentioned, else null",
   "instruction": "for draft_request only — what the draft should say, else null",
   "city": "for roadshow only — the city/area to plan around, else null",
+  "wants_drafts": "for roadshow only — true if they want the outreach emails drafted, else false",
   "location": "for set_location only — the city where the contact/firm is based, else null"
 }
 
@@ -848,3 +851,40 @@ async def try_action_command(note: str) -> dict | None:
     if not (data.get("contact") or "").strip():
         return None
     return data
+
+
+DECOMPOSE_PROMPT = """You split a fund manager's email to his CRM assistant into the DISTINCT, separately-actionable requests it contains.
+
+MOST emails are a SINGLE request — return it as one item. Only split when the email clearly asks for TWO OR MORE DIFFERENT deliverables, for example:
+- "give me today's to-do AND a general status report" -> two tasks
+- "a target list for the LA roadshow and draft the outreach emails" -> two tasks
+- "brief me on Acme and draft a follow-up to Jane" -> two tasks
+
+Do NOT split a single request into steps, and do NOT split the parameters of one request (e.g. "a roadshow through LA and SF" is ONE trip, "update her stage and phone" is ONE update). When you DO split, REWRITE each task so it stands ALONE, repeating the shared context — names, firms, cities, products, dates — inside each task so it can be handled on its own.
+
+Return ONLY a JSON array of task strings. One item if it's a single request. Max 5 items."""
+
+
+async def decompose_tasks(note: str) -> list[str]:
+    """Split a multi-request email into standalone task strings so each gets handled.
+    Returns [note] unchanged for a single request (the common case) or on any failure —
+    so single asks and code-change commands are never reworded, only genuine multi-asks
+    are split. See crm_agent._reply_to_note, which runs each returned task through routing."""
+    note = (note or "").strip()
+    if not note:
+        return [note]
+    try:
+        resp = await claude.messages.create(
+            model=MODEL, max_tokens=600, system=DECOMPOSE_PROMPT,
+            messages=[{"role": "user", "content": note}],
+        )
+        text = resp.content[0].text.strip().strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:]
+        tasks = [t.strip() for t in json.loads(text) if isinstance(t, str) and t.strip()]
+    except Exception as e:
+        logger.warning(f"crm_ask: task decomposition failed, treating as single request: {e}")
+        return [note]
+    # Only trust a genuine multi-split; a 1-item (or empty) result falls back to the
+    # original wording so single requests and code commands are never altered.
+    return tasks[:5] if len(tasks) >= 2 else [note]

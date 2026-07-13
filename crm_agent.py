@@ -573,7 +573,19 @@ async def _reply_text(msg: dict, sender: str, reply: str):
     )
 
 
-async def _reply_to_note(msg: dict, note: str):
+async def _reply_to_note(msg: dict, note: str, _decomposed: bool = False):
+    # Multi-task: an email may ask for several distinct things ("today's to-do AND a status
+    # report", "a roadshow target list AND draft the outreach emails"). Split it into standalone
+    # tasks and run each through routing (one reply per task). Single requests — the common case —
+    # and code-change commands come back as one item and fall through unchanged. _decomposed
+    # guards against infinite recursion on the per-task calls.
+    if not _decomposed:
+        tasks = await crm_ask.decompose_tasks(note)
+        if len(tasks) > 1:
+            for t in tasks:
+                await _reply_to_note(msg, t, _decomposed=True)
+            return
+
     m = _BRIEF_RE.match(note.strip())
     if m:
         contact_query = m.group(1).strip().rstrip("?.,!")
@@ -655,7 +667,9 @@ async def _reply_to_note(msg: dict, note: str):
                     if not from_owner:
                         await _reply_text(msg, sender, "Roadshow planning is available to the account owner only.")
                         return
-                    await _reply_text(msg, sender, await crm_roadshow.roadshow(
+                    # wants_drafts -> the outreach emails; otherwise the tiered target list.
+                    _rs_fn = crm_roadshow.draft_emails if action.get("wants_drafts") else crm_roadshow.roadshow
+                    await _reply_text(msg, sender, await _rs_fn(
                         (action.get("city") or "").strip(), (action.get("product") or "").strip() or None))
                     return
                 if action["action"] == "set_location":
