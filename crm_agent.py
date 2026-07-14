@@ -90,9 +90,18 @@ _STATUS_RE = re.compile(
 # generic `draft <contact>` command). Owner-only.
 _DRAFT_ROADSHOW_RE = re.compile(r"^draft\s+road\s?show\s+([^:]+?)(?::\s*(.+))?\s*$", re.I)
 _ROADSHOW_RE = re.compile(r"^road\s?show\s+([^:]+?)(?::\s*(.+))?\s*$", re.I)
-# A note mentioning a roadshow / trip target list, so the fuzzy focus/priority catch-all in
-# _handle_command doesn't hijack "the investors we should focus on for the roadshow" into the todo.
-_ROADSHOW_HINT_RE = re.compile(r"road\s?show|target list|who\s+(?:should|do)\s+i\s+(?:meet|see)|trip\s+to", re.I)
+# Narrow: a roadshow / trip note — keeps the generic `draft <contact>` command from hijacking
+# "draft an email for a roadshow ..." (which has no contact) away from the roadshow handler.
+_ROADSHOW_HINT_RE = re.compile(r"road\s?show|\btrip\b", re.I)
+# Broad: any investor / prospect / target-list intent. A request for a LIST of investors must
+# never be answered with the daily to-do dashboard (owner feedback), so this guards the fuzzy
+# focus/priority catch-all in _handle_command — those notes fall through to the roadshow
+# classifier or relationship Q&A instead of crm_todo.
+_LIST_INTENT_RE = re.compile(
+    r"road\s?show|target list|list of (?:investor|prospect|lp|name|contact)"
+    r"|\b(?:investors?|prospects?|lps?)\b|who\s+(?:should|do)\s+i\s+(?:meet|see|target)|\btrip\b",
+    re.I,
+)
 # Manual location tag: "set location Fairbridge: Los Angeles" (firm or contact). Owner-only.
 _LOCATION_RE = re.compile(r"^(?:set\s+|tag\s+)?location\s+([^:]+):\s*(.+)$", re.I)
 
@@ -401,9 +410,6 @@ async def _handle_command(note: str) -> str | None:
     m = _OPP_RE.match(note)
     if m:
         contact_query, opp_details = m.group(1).strip(), m.group(2).strip()
-        person = crm_store.find_person(contact_query)
-        if not person:
-            return f"No contact matching '{contact_query}'."
         # parse "Product, Stage, $Xm, next step" loosely
         parts = [p.strip() for p in opp_details.split(",")]
         product = parts[0] if parts else opp_details
@@ -418,16 +424,37 @@ async def _handle_command(note: str) -> str | None:
             except ValueError:
                 next_step = amount_raw  # wasn't a number, treat as next step
                 amount = None
-        crm_store.upsert_opportunity(person["id"], product, stage, amount, next_step)
+        person = crm_store.find_person(contact_query)
+        if person:
+            crm_store.upsert_opportunity(person["id"], product, stage, amount, next_step)
+            target = person.get("name") or person["email"]
+            note_line = ""
+        else:
+            # No contact/firm on file — never refuse. Create (or reuse) an account for the named
+            # firm, anchor the opportunity there, and kick off best-effort public enrichment so a
+            # placeholder fills in over time. (Per owner: lack of firm info must not block a deal.)
+            firm_id, is_new = crm_store.get_or_create_firm(contact_query)
+            if firm_id is None:
+                return f"Couldn't create an account for '{contact_query}'."
+            crm_store.upsert_opportunity(None, product, stage, amount, next_step, firm_id=firm_id)
+            target = contact_query
+            if is_new:
+                asyncio.create_task(crm_enrich.enrich_firm(firm_id, contact_query))
+                note_line = "\n(New account created with no contact on file — researching public info.)"
+            else:
+                note_line = "\n(Logged at the firm level — no specific contact on file.)"
         return (
-            f"Opportunity logged for {person.get('name') or person['email']}:\n"
+            f"Opportunity logged for {target}:\n"
             f"Product: {product}\nStage: {stage or 'New'}"
             + (f"\nAmount: ${amount:,.0f}" if amount else "")
             + (f"\nNext step: {next_step}" if next_step else "")
+            + note_line
         )
 
+    # Skip the generic draft command for roadshow-draft notes ("draft an email for a roadshow
+    # through LA and SF") — they have no contact and belong to the roadshow handler downstream.
     m = _DRAFT_RE.match(note)
-    if m:
+    if m and not _ROADSHOW_HINT_RE.search(note):
         query, instruction = m.group(1).strip(), m.group(2).strip()
         return await crm_draft.generate(query, instruction or "Write a friendly check-in follow-up.")
 
@@ -436,10 +463,10 @@ async def _handle_command(note: str) -> str | None:
     # opportunity/update note may contain "this week") isn't hijacked away from its real handler.
     if _SCORING_HELP_RE.search(note):
         return crm_score.explain_methodology()
-    # ...but a roadshow ask often contains focus/priority words ("investors we should FOCUS ON
-    # for the roadshow", "top targets") — let those fall through to the roadshow classifier
-    # instead of being hijacked into the to-do dashboard.
-    if _FOCUS_RE.search(note) and not _ROADSHOW_HINT_RE.search(note):
+    # ...but an investor-list / roadshow ask often contains focus/priority words ("investors we
+    # should FOCUS ON", "top targets ranked by PRIORITY") — those want a LIST, never the to-do
+    # dashboard, so let them fall through to the roadshow classifier / relationship Q&A.
+    if _FOCUS_RE.search(note) and not _LIST_INTENT_RE.search(note):
         return await crm_todo.generate()
 
     return None

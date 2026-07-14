@@ -375,11 +375,30 @@ async def try_natural_update(note: str) -> str | None:
     person = crm_store.find_person(contact_query)
     people = [person] if person else crm_store.find_people_by_firm(contact_query)
 
-    if not people:
-        return f"No contact or firm matching '{contact_query}'."
-
     opp = data.get("opportunity") or {}
     product = (opp.get("product") or "").strip()
+
+    if not people:
+        # No contact/firm on file. If this carries an opportunity, create the account and log it
+        # at the firm level rather than refusing — lack of contact info must not block a deal.
+        if product:
+            firm_id, is_new = crm_store.get_or_create_firm(contact_query)
+            if firm_id is not None:
+                opp_fields = {k: v for k, v in opp.items() if k != "product" and v not in (None, "")}
+                crm_store.upsert_opportunity(
+                    None, product, stage=opp_fields.get("stage"),
+                    deal_amount_usd=opp_fields.get("deal_amount_usd"),
+                    next_step=opp_fields.get("next_step"), mandate=opp_fields.get("mandate"),
+                    notes=opp_fields.get("notes"), firm_id=firm_id,
+                )
+                if is_new:
+                    import asyncio as _asyncio
+                    import crm_enrich
+                    _asyncio.create_task(crm_enrich.enrich_firm(firm_id, contact_query))
+                return (f"Created account <b>{contact_query}</b> and logged the <b>{product}</b> "
+                        + ("opportunity — researching public info." if is_new else "opportunity."))
+        return f"No contact or firm matching '{contact_query}'."
+
     if product:
         opp_fields = {k: v for k, v in opp.items() if k != "product" and v is not None and v != ""}
         summaries = []
