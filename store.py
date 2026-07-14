@@ -25,18 +25,50 @@ def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
     return _pool
 
 
+def _healthy_conn(pool):
+    """Return a live pooled connection, transparently replacing one the server has dropped.
+    Railway's Postgres proxy closes idle connections; psycopg2's pool otherwise hands the dead
+    one straight back, causing 'connection already closed' on first use. A cheap SELECT 1 probes
+    liveness and a stale connection is discarded (closed) and replaced with a fresh one."""
+    conn = None
+    for _ in range(3):
+        conn = pool.getconn()
+        try:
+            if conn.closed:
+                raise psycopg2.OperationalError("stale pooled connection")
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            conn.rollback()  # end the probe's implicit transaction; hand back a clean connection
+            return conn
+        except psycopg2.Error:
+            try:
+                pool.putconn(conn, close=True)  # drop the dead one instead of recycling it
+            except Exception:
+                pass
+            conn = None
+    # Couldn't validate one in a few tries — best effort, let the caller proceed.
+    return conn if conn is not None else pool.getconn()
+
+
 @contextmanager
 def get_conn():
     pool = _get_pool()
-    conn = pool.getconn()
+    conn = _healthy_conn(pool)
+    broken = False
     try:
         yield conn
         conn.commit()
     except Exception:
-        conn.rollback()
+        try:
+            conn.rollback()
+        except Exception:
+            broken = True  # rollback failed (connection dropped mid-use) — don't recycle it
         raise
     finally:
-        pool.putconn(conn)
+        try:
+            pool.putconn(conn, close=broken)
+        except Exception:
+            pass
 
 
 def init_db():
