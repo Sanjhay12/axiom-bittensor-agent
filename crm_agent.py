@@ -104,6 +104,13 @@ _LIST_INTENT_RE = re.compile(
 )
 # Manual location tag: "set location Fairbridge: Los Angeles" (firm or contact). Owner-only.
 _LOCATION_RE = re.compile(r"^(?:set\s+|tag\s+)?location\s+([^:]+):\s*(.+)$", re.I)
+# Train the drafting voice: "voice: <paste your own emails / style>" (owner-only). re.S so a
+# multi-line paste of sample emails is captured whole. Show form: "voice" / "show voice".
+_VOICE_SET_RE = re.compile(
+    r"^(?:set\s+|train\s+(?:your\s+)?|update\s+(?:your\s+)?|my\s+)?voice(?:\s+profile)?(?:\s+samples?)?\s*[:\-]\s*(.+)$",
+    re.I | re.S,
+)
+_VOICE_SHOW_RE = re.compile(r"^(?:show\s+)?(?:my\s+)?voice(?:\s+profile)?\s*\??$", re.I)
 
 HELP_TEXT = """<b>Cedar Ridge Inbox Agent — commands</b>
 
@@ -120,7 +127,8 @@ You can email any of these, or just forward/BCC a relationship email and it gets
 <b>status</b> (or <b>status report</b> / <b>fund status</b>) — owner-only executive one-pager for your manager/fund on Cedar Ridge letterhead: where the raise stands, pipeline funnel charts, top prospects, investor feedback, and next steps. Defaults to trailing 30 days.
 <b>roadshow &lt;city&gt;</b> (or <b>roadshow &lt;city&gt;: &lt;product&gt;</b>) — owner-only trip planner: who to meet in a city, tiered into anchors (warm, meet in person), meeting candidates, and prospects just outside the city worth traveling for. E.g. "roadshow LA: Nebari". Then <b>draft roadshow &lt;city&gt;</b> generates copy-paste meeting-request emails for them.
 <b>set location &lt;firm or contact&gt;: &lt;city&gt;</b> — tag where an investor is based (e.g. "set location Fairbridge: Los Angeles"), used by roadshow. Locations are also inferred automatically, but your tags win.
-<b>draft &lt;name or email&gt;: &lt;instruction&gt;</b> — draft a reply for your review (never auto-sent)
+<b>draft &lt;name or email&gt;: &lt;instruction&gt;</b> — draft a reply for your review (never auto-sent), written in your trained voice
+<b>voice: &lt;paste a few of your own sent emails&gt;</b> — train the drafter on how you write, so every draft sounds like you (send <b>voice</b> to see what's on file)
 <b>who is in &lt;stage&gt;</b> — e.g. "who is in diligence", "who's in engaged"
 <b>high priority &lt;name or email&gt;</b> — always flag this contact in the daily digest
 <b>remove high priority &lt;name or email&gt;</b> — undo that
@@ -670,6 +678,28 @@ async def _reply_to_note(msg: dict, note: str, _decomposed: bool = False):
             await _reply_text(msg, sender, "Tagging locations is available to the account owner only.")
             return
         await _reply_text(msg, sender, _do_set_location(m.group(1), m.group(2)))
+        return
+
+    # Train / show the drafting voice (owner-only). Checked before the generic handlers so a
+    # multi-line "voice: <pasted emails>" isn't mis-parsed as a note/update.
+    if _VOICE_SHOW_RE.match(note.strip()):
+        vp = crm_store.get_config("voice_profile")
+        await _reply_text(msg, sender, (
+            f"<b>Your drafting voice on file:</b>\n\n{vp}" if vp else
+            "No custom voice yet — drafts use the built-in default. Email "
+            "\"<b>voice:</b> &lt;paste 3-5 of your own sent emails&gt;\" and I'll write in your style."
+        ))
+        return
+    vm = _VOICE_SET_RE.match(note.strip())
+    if vm:
+        if not from_owner:
+            await _reply_text(msg, sender, "Training the drafting voice is available to the account owner only.")
+            return
+        sample = vm.group(1).strip()
+        crm_store.set_config("voice_profile", sample, sender)
+        await _reply_text(msg, sender,
+            f"Got it — future drafts will mirror your voice from that ({len(sample)} chars saved). "
+            "Send \"voice: ...\" again anytime to replace it, or \"voice\" to see what's on file.")
         return
 
     try:

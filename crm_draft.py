@@ -14,11 +14,13 @@ import crm_store
 claude = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 MODEL = "claude-sonnet-4-5"
 
-# Edit this to match how you actually write — short examples help Claude match your voice.
-VOICE_PROFILE = """Direct, warm, no corporate filler. Short sentences. Doesn't over-explain or \
+# Fallback when the owner hasn't trained a voice yet. Once he sends samples of his own
+# writing (stored under the 'voice_profile' config key), those are used instead — see
+# _voice() and crm_agent's voice command.
+DEFAULT_VOICE = """Direct, warm, no corporate filler. Short sentences. Doesn't over-explain or \
 over-apologize. Gets to the point in the first line. Signs off simply."""
 
-DRAFT_SYSTEM_PROMPT = f"""You draft a single email on behalf of Joe Azzaro, a fund manager at Cedar Ridge Capital raising capital.
+DRAFT_SYSTEM_PROMPT = """You draft a single email on behalf of Joe Azzaro, a fund manager at Cedar Ridge Capital raising capital.
 
 Use the contact's full profile and interaction history — reference real prior conversation, don't write generically.
 
@@ -27,10 +29,19 @@ Critical constraints:
 - NEVER ignore an objection — if they raised a fee concern, don't pretend it doesn't exist; address it or work around it
 - If they've expressed what they care about, lead with that angle
 - If there are active objections in the objection profile, the draft should either address them directly or be structured to move past them
-- Match this voice: {VOICE_PROFILE}
+
+VOICE — write EXACTLY as Joe writes. Below are samples of his own emails and/or notes on his style; study them and mirror his tone, greeting, sentence length, vocabulary, level of formality, and sign-off. Do not sound like a generic AI assistant:
+---
+{voice}
+---
 
 Output only the email body (no subject line, no commentary, no "Here's a draft:" preamble).
 """
+
+
+def _voice() -> str:
+    """The owner's trained writing voice (samples/style he's sent), or the default."""
+    return crm_store.get_config("voice_profile") or DEFAULT_VOICE
 
 
 async def generate(query: str, instruction: str) -> str:
@@ -76,7 +87,7 @@ async def generate(query: str, instruction: str) -> str:
     resp = await claude.messages.create(
         model=MODEL,
         max_tokens=500,
-        system=DRAFT_SYSTEM_PROMPT + crm_store.directives_prompt_block(),
+        system=DRAFT_SYSTEM_PROMPT.format(voice=_voice()) + crm_store.directives_prompt_block(),
         messages=[{
             "role": "user",
             "content": f"Profile:\n{profile}\nHistory:\n{history_text}\n\nInstruction: {instruction}",
