@@ -803,8 +803,11 @@ elsewhere and should return null here.
 - "reject_stage": dismiss a pending pipeline stage change (e.g. "no, don't change her stage").
 - "score_query": asking specifically for a contact's numeric LP score / signal breakdown (e.g.
   "what's Jane's score", "how warm is Jane on paper").
-- "draft_request": asking to draft/write a reply or follow-up email to send to this contact (e.g.
-  "draft a follow-up to Jane about the fund", "write her a check-in note").
+- "draft_request": asking to draft/write a reply or follow-up email to ONE specific named contact
+  (e.g. "draft a follow-up to Jane about the fund", "write her a check-in note"). The recipient is
+  a real person/firm you can name. This is NOT for roadshow/trip outreach: if the email is for
+  meeting investors on a trip through one or more cities — even when it's phrased "draft an email
+  for a roadshow..." — use "roadshow" with wants_drafts true instead, and leave "contact" null.
 - "enrich_request": asking to research/look up a contact or a fund/firm's background — funding
   history, recent news, LinkedIn. "contact" here can be a fund/firm name that has NO contact or
   even a firm on file yet — e.g. "find funding history for Acme Capital" or "research Meridian
@@ -816,9 +819,11 @@ elsewhere and should return null here.
 - "roadshow": planning which investors to meet in a specific city/area or on an upcoming trip —
   NOT about one named contact (e.g. "I'm heading to LA with Nebari, who should I meet?", "who
   should I see when I'm in New York?", "plan my Boston trip"). Put the city in "city" and, if a
-  fund/product is named, put it in "product". Leave "contact" null. Set "wants_drafts" true ONLY
-  if they're asking for the outreach/meeting EMAILS to be drafted (e.g. "draft the emails for my
-  LA roadshow", "write outreach notes for the SF trip"); a plain "who should I meet" is false.
+  fund/product is named, put it in "product". If SEVERAL cities are named (e.g. "a roadshow through
+  Los Angeles and San Francisco"), put them all in "city" joined with " and ". Leave "contact"
+  null. Set "wants_drafts" true if they're asking for the outreach/meeting EMAILS to be drafted —
+  including phrasings like "draft an email for a roadshow through LA and SF", "draft the emails for
+  my LA roadshow", "write outreach notes for the SF trip"; a plain "who should I meet" is false.
 - "status_report": asking for an overall fundraising STATUS / progress summary to share with his
   manager or a fund — where the whole raise stands, not one contact (e.g. "give me a status update
   for the fund", "how's the raise going", "something I can send my manager on where we're at").

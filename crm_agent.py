@@ -128,7 +128,7 @@ You can email any of these, or just forward/BCC a relationship email and it gets
 <b>roadshow &lt;city&gt;</b> (or <b>roadshow &lt;city&gt;: &lt;product&gt;</b>) — owner-only trip planner: who to meet in a city, tiered into anchors (warm, meet in person), meeting candidates, and prospects just outside the city worth traveling for. E.g. "roadshow LA: Nebari". Then <b>draft roadshow &lt;city&gt;</b> generates copy-paste meeting-request emails for them.
 <b>set location &lt;firm or contact&gt;: &lt;city&gt;</b> — tag where an investor is based (e.g. "set location Fairbridge: Los Angeles"), used by roadshow. Locations are also inferred automatically, but your tags win.
 <b>draft &lt;name or email&gt;: &lt;instruction&gt;</b> — draft a reply for your review (never auto-sent), written in your trained voice
-<b>voice: &lt;paste a few of your own sent emails&gt;</b> — train the drafter on how you write, so every draft sounds like you (send <b>voice</b> to see what's on file)
+<b>voice</b> — see the writing voice drafts use; it's learned automatically from your own sent emails. To override it, email <b>voice: &lt;paste a few of your own emails&gt;</b>
 <b>who is in &lt;stage&gt;</b> — e.g. "who is in diligence", "who's in engaged"
 <b>high priority &lt;name or email&gt;</b> — always flag this contact in the daily digest
 <b>remove high priority &lt;name or email&gt;</b> — undo that
@@ -288,6 +288,12 @@ async def _dispatch_action(action: dict) -> str | None:
     if act == "score_query":
         return _do_score(contact_query)
     if act == "draft_request":
+        # Safety net: a roadshow-outreach ask ("draft an email for a roadshow through LA and SF")
+        # can be misclassified as a per-contact draft with the whole phrase as the "contact" —
+        # which isn't a person and would dead-end on "No contact matching...". Hand it back
+        # (return None) so the roadshow path takes it instead of erroring out.
+        if _ROADSHOW_HINT_RE.search(contact_query):
+            return None
         return await crm_draft.generate(contact_query, action.get("instruction") or "Write a friendly check-in follow-up.")
     if act == "enrich_request":
         person = crm_store.find_person(contact_query)
@@ -683,12 +689,11 @@ async def _reply_to_note(msg: dict, note: str, _decomposed: bool = False):
     # Train / show the drafting voice (owner-only). Checked before the generic handlers so a
     # multi-line "voice: <pasted emails>" isn't mis-parsed as a note/update.
     if _VOICE_SHOW_RE.match(note.strip()):
-        vp = crm_store.get_config("voice_profile")
-        await _reply_text(msg, sender, (
-            f"<b>Your drafting voice on file:</b>\n\n{vp}" if vp else
-            "No custom voice yet — drafts use the built-in default. Email "
-            "\"<b>voice:</b> &lt;paste 3-5 of your own sent emails&gt;\" and I'll write in your style."
-        ))
+        source, text = crm_draft.voice_status()
+        await _reply_text(msg, sender,
+            f"<b>Drafting voice — {source}:</b>\n\n{text}\n\n"
+            "<i>I learn this from your own sent emails automatically. To override, email "
+            "\"voice: &lt;paste a few of your emails&gt;\".</i>")
         return
     vm = _VOICE_SET_RE.match(note.strip())
     if vm:
@@ -1020,7 +1025,7 @@ async def process_once():
 
         is_new_interaction = crm_store.insert_interaction(
             person_id, msg["message_id"], msg["subject"], msg["direction"],
-            msg["ts"], extracted, msg.get("body", ""),
+            msg["ts"], extracted, msg.get("body", ""), msg.get("from"),
         )
 
         if not is_new_interaction:

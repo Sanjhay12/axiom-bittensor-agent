@@ -5,13 +5,26 @@ for relationship memory: firms, people, and the interactions that evidence them.
 """
 from __future__ import annotations
 import json
+import os
 import re
 import time
 from datetime import datetime, timezone
+from email.utils import parseaddr
 
 import psycopg2.extras
 
 import store
+
+# Joe's own address(es) — used to tell mail HE wrote (for learning his drafting voice)
+# from investor mail he merely forwarded. Same env var crm_mailbox reads.
+OWNER_EMAILS = [e.strip().lower() for e in os.getenv("OWNER_EMAIL", "").split(",") if e.strip()]
+
+
+def _addr(from_header: str | None) -> str | None:
+    """The bare lowercased email address out of a From header ("Joe <joe@x.com>" -> "joe@x.com")."""
+    if not from_header:
+        return None
+    return (parseaddr(from_header)[1] or "").strip().lower() or None
 
 
 def init_crm_db():
@@ -107,6 +120,10 @@ def init_crm_db():
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crm_interactions_person ON crm_interactions(person_id)")
+            # Who authored the email (bare From address). Lets us learn Joe's OWN writing voice
+            # from mail he sent, without picking up investor prose he only forwarded. Historical
+            # rows stay NULL (the sender wasn't captured then) — the voice learns going forward.
+            cur.execute("ALTER TABLE crm_interactions ADD COLUMN IF NOT EXISTS from_addr TEXT")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crm_interactions_ts ON crm_interactions(ts)")
 
             cur.execute("""
@@ -694,26 +711,30 @@ def reject_pending_stage(person_id: int):
 
 
 def insert_interaction(person_id: int, message_id: str, subject: str, direction: str,
-                        ts: int, extracted: dict, raw_excerpt: str) -> bool:
+                        ts: int, extracted: dict, raw_excerpt: str,
+                        from_header: str | None = None) -> bool:
     """Returns False if this message_id was already recorded (dedupe).
 
     For inbound relationship mail, the interaction's ts is the real contact date Claude
     extracted (not when it was forwarded to the inbox). Outbound (Joe's own replies) has
-    no extracted date, so it falls back to the passed ts (= now), which is correct."""
+    no extracted date, so it falls back to the passed ts (= now), which is correct.
+
+    from_header is the raw From of the ingested message; we store just the bare address so
+    Joe's own writing can later be pulled back out to learn his drafting voice."""
     interaction_ts = _resolve_last_touch_ts(extracted, ts) if direction == "inbound" else ts
     with store.get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO crm_interactions (
                     person_id, message_id, subject, direction, ts, summary,
-                    entities, sentiment, importance, raw_excerpt, created_at
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    entities, sentiment, importance, raw_excerpt, from_addr, created_at
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (message_id) DO NOTHING
             """, (
                 person_id, message_id, subject, direction, interaction_ts,
                 extracted.get("summary"), json.dumps(extracted.get("entities") or []),
                 extracted.get("sentiment"), extracted.get("importance"),
-                (raw_excerpt or "")[:2000], int(time.time()),
+                (raw_excerpt or "")[:2000], _addr(from_header), int(time.time()),
             ))
             return cur.rowcount > 0
 
@@ -733,6 +754,25 @@ def list_interactions(person_id: int) -> list[dict]:
                 (person_id,),
             )
             return cur.fetchall()
+
+
+def recent_outbound_excerpts(limit: int = 6) -> list[str]:
+    """The bodies of Joe's own recent sent emails (most recent first) — i.e. interactions he
+    authored (from_addr is one of his addresses), not investor mail he forwarded. Used to learn
+    his writing voice for drafts without him pasting samples — see crm_draft.voice_status.
+    Empty until some of his own mail has been ingested (from_addr is only captured going forward)."""
+    if not OWNER_EMAILS:
+        return []
+    with store.get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT raw_excerpt FROM crm_interactions "
+                "WHERE lower(from_addr) = ANY(%s) AND raw_excerpt IS NOT NULL "
+                "AND btrim(raw_excerpt) <> '' "
+                "ORDER BY ts DESC LIMIT %s",
+                (OWNER_EMAILS, limit),
+            )
+            return [r["raw_excerpt"].strip() for r in cur.fetchall() if (r["raw_excerpt"] or "").strip()]
 
 
 def list_interactions_for_people(person_ids: list[int]) -> dict[int, list[dict]]:

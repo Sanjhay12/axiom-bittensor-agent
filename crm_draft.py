@@ -14,9 +14,9 @@ import crm_store
 claude = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 MODEL = "claude-sonnet-4-5"
 
-# Fallback when the owner hasn't trained a voice yet. Once he sends samples of his own
-# writing (stored under the 'voice_profile' config key), those are used instead — see
-# _voice() and crm_agent's voice command.
+# Last-resort fallback, only used when there's nothing of Joe's own writing to learn from
+# yet. Normally the voice is learned automatically from his real sent emails (see
+# voice_status), or from samples he's explicitly pasted (the 'voice_profile' config key).
 DEFAULT_VOICE = """Direct, warm, no corporate filler. Short sentences. Doesn't over-explain or \
 over-apologize. Gets to the point in the first line. Signs off simply."""
 
@@ -39,9 +39,25 @@ Output only the email body (no subject line, no commentary, no "Here's a draft:"
 """
 
 
+def voice_status() -> tuple[str, str]:
+    """(source, samples) for the voice a draft will currently write in. Precedence:
+      1. an explicit profile Joe pasted ("voice: ..."), if any — a manual override always wins;
+      2. otherwise learned automatically from his own recent sent emails already on file;
+      3. otherwise the built-in default, until there's any of his writing to learn from.
+    The 'source' string is human-readable for the "voice" command."""
+    explicit = crm_store.get_config("voice_profile")
+    if explicit:
+        return "samples you pasted", explicit
+    samples = crm_store.recent_outbound_excerpts()
+    if samples:
+        joined = "\n\n---\n\n".join(samples)
+        return f"learned from {len(samples)} of your own sent emails", joined
+    return "built-in default (no sent emails on file yet)", DEFAULT_VOICE
+
+
 def _voice() -> str:
-    """The owner's trained writing voice (samples/style he's sent), or the default."""
-    return crm_store.get_config("voice_profile") or DEFAULT_VOICE
+    """The samples/style text injected into the draft prompt — see voice_status."""
+    return voice_status()[1]
 
 
 async def generate(query: str, instruction: str) -> str:
