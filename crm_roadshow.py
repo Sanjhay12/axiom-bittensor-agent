@@ -52,7 +52,8 @@ def _gather_candidates() -> list[dict]:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
                 SELECT p.id, p.name, p.email, p.stage, p.importance, p.deal_amount_usd,
-                       p.next_step, p.mandate, p.investor_type, p.liked_products, p.warmth,
+                       p.next_step, p.mandate, p.investor_type, p.role, p.relationship_type,
+                       p.liked_products, p.warmth,
                        p.last_touch_ts, p.location AS person_location, p.notes,
                        f.id AS firm_id, f.name AS firm_name, f.location AS firm_location,
                        (SELECT COUNT(*) FROM crm_interactions i WHERE i.person_id = p.id) AS interaction_count,
@@ -138,6 +139,8 @@ You are given the target city, an optional product/fund he's raising for, and a 
 
 Sort the relevant contacts into exactly three tiers. Include a contact in AT MOST one tier, and OMIT anyone whose location is unknown or clearly far from the target city (different region/coast).
 
+CRITICAL — only potential INVESTORS belong on this roadshow. Cedar Ridge is RAISING capital, so OMIT any contact who is themselves a fund manager, GP, or asset manager running their own investment strategies — a peer/competitor who raises and deploys their own capital rather than an LP/allocator who could invest INTO Cedar Ridge's funds. Judge from their firm, role, and mandate: e.g. an asset manager running its own lending/credit strategies is a GP — omit it. Genuine allocators DO belong — family offices, pensions, endowments, funds-of-funds, OCIOs, consultants, RIAs/wealth managers allocating on behalf of clients — because they could allocate to Cedar Ridge. If it's genuinely unclear whether a contact is an allocator or a manager, leave them out.
+
 - "anchors": located IN the target city or its immediate metro, already warm/engaged with roughly 2-3+ interactions, where an in-person meeting is high-value and timely. These are the priority meetings.
 - "candidates": located IN the city or metro and worth meeting, but earlier-stage or fewer interactions than an anchor.
 - "travel_worth": strong, worthwhile prospects located just OUTSIDE the central city (nearby city/suburb, same broad area) that could justify a short side-trip.
@@ -162,6 +165,7 @@ def _compact_candidates(candidates: list[dict], now: int) -> list[dict]:
             "warmth": r.get("warmth"), "importance": r.get("importance"),
             "products": r.get("products"), "liked_products": r.get("liked_products"),
             "mandate": r.get("mandate"), "investor_type": r.get("investor_type"),
+            "role": r.get("role"), "relationship_type": r.get("relationship_type"),
             "days_since_touch": _days_ago(r.get("last_touch_ts"), now),
             "next_step": r.get("next_step"),
         })

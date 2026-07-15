@@ -55,6 +55,17 @@ _WHOIS_RE = re.compile(r"^whois\s+(.+)$", re.I)
 _SCORE_RE = re.compile(r"^score\s+(.+)$", re.I)
 _BRIEF_RE = re.compile(r"^brief\s+([^:]+?)(?::\s*(.+))?$", re.I)
 _DRAFT_RE = re.compile(r"^draft\s+([^:]+):?\s*(.*)$", re.I)
+
+
+def _looks_like_contact(s: str) -> bool:
+    """A real 'draft <who>' target is a short name/firm/email, not a sentence. Guards the
+    fast-path draft command from swallowing a natural-language request like "Draft outreach
+    email to Voice following up on ... Key differentiations: ..." — whose first colon sits deep
+    inside the instruction, so _DRAFT_RE would grab the whole opening as the 'contact'. When the
+    captured target doesn't look like a name, we fall through to the LLM classifier, which pulls
+    the real contact out of the sentence."""
+    s = (s or "").strip()
+    return bool(s) and len(s) <= 50 and s.count(" ") <= 6 and ". " not in s and "\n" not in s
 _WHO_IN_RE = re.compile(r"^who(?:'s|s|\s+is|\s+are)\s+in\s+(.+)$", re.I)
 _HIGH_PRIORITY_RE = re.compile(r"^(?:mark\s+|set\s+)?high.?priority\s+(.+)$", re.I)
 _UNHIGH_PRIORITY_RE = re.compile(r"^(?:remove|unset|clear)\s+high.?priority\s+(.+)$", re.I)
@@ -468,7 +479,7 @@ async def _handle_command(note: str) -> str | None:
     # Skip the generic draft command for roadshow-draft notes ("draft an email for a roadshow
     # through LA and SF") — they have no contact and belong to the roadshow handler downstream.
     m = _DRAFT_RE.match(note)
-    if m and not _ROADSHOW_HINT_RE.search(note):
+    if m and not _ROADSHOW_HINT_RE.search(note) and _looks_like_contact(m.group(1)):
         query, instruction = m.group(1).strip(), m.group(2).strip()
         return await crm_draft.generate(query, instruction or "Write a friendly check-in follow-up.")
 

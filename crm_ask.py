@@ -805,9 +805,12 @@ elsewhere and should return null here.
   "what's Jane's score", "how warm is Jane on paper").
 - "draft_request": asking to draft/write a reply or follow-up email to ONE specific named contact
   (e.g. "draft a follow-up to Jane about the fund", "write her a check-in note"). The recipient is
-  a real person/firm you can name. This is NOT for roadshow/trip outreach: if the email is for
-  meeting investors on a trip through one or more cities — even when it's phrased "draft an email
-  for a roadshow..." — use "roadshow" with wants_drafts true instead, and leave "contact" null.
+  a real person/firm you can name — and may be named MID-SENTENCE ("draft an outreach email TO
+  Voice following up on the Nebari conversation…"): pull out just that name/firm as "contact" and
+  put everything else (the ask, the talking points, the fund details) into "instruction", however
+  long. This is NOT for roadshow/trip outreach: if the email is for meeting investors on a trip
+  through one or more cities — even when it's phrased "draft an email for a roadshow..." — use
+  "roadshow" with wants_drafts true instead, and leave "contact" null.
 - "enrich_request": asking to research/look up a contact or a fund/firm's background — funding
   history, recent news, LinkedIn. "contact" here can be a fund/firm name that has NO contact or
   even a firm on file yet — e.g. "find funding history for Acme Capital" or "research Meridian
