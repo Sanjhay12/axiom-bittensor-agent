@@ -689,10 +689,11 @@ async def _reply_to_note(msg: dict, note: str, _decomposed: bool = False):
     # Train / show the drafting voice (owner-only). Checked before the generic handlers so a
     # multi-line "voice: <pasted emails>" isn't mis-parsed as a note/update.
     if _VOICE_SHOW_RE.match(note.strip()):
-        source, text = crm_draft.voice_status()
+        source, text = await crm_draft.resolve_voice()
         await _reply_text(msg, sender,
             f"<b>Drafting voice — {source}:</b>\n\n{text}\n\n"
-            "<i>I learn this from your own sent emails automatically. To override, email "
+            "<i>I learn this from your own emails automatically — including the messages you "
+            "wrote inside threads you forward. To override, email "
             "\"voice: &lt;paste a few of your emails&gt;\".</i>")
         return
     vm = _VOICE_SET_RE.match(note.strip())

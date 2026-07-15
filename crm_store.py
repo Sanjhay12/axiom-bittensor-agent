@@ -756,23 +756,25 @@ def list_interactions(person_id: int) -> list[dict]:
             return cur.fetchall()
 
 
-def recent_outbound_excerpts(limit: int = 6) -> list[str]:
-    """The bodies of Joe's own recent sent emails (most recent first) — i.e. interactions he
-    authored (from_addr is one of his addresses), not investor mail he forwarded. Used to learn
-    his writing voice for drafts without him pasting samples — see crm_draft.voice_status.
-    Empty until some of his own mail has been ingested (from_addr is only captured going forward)."""
+def recent_owner_messages(limit: int = 8) -> list[dict]:
+    """Joe's own recent email bodies (newest first) with their ts, for learning his drafting
+    voice — interactions he authored (from_addr is one of his addresses). This includes both
+    clean sends and forwarded threads (both arrive From: him), so the body may be a mixed
+    back-and-forth; crm_draft extracts just his own prose from each. The ts lets the caller
+    cache the learned voice and only rebuild when newer mail of his has arrived. Empty until
+    some of his own mail has been ingested (from_addr is only captured going forward)."""
     if not OWNER_EMAILS:
         return []
     with store.get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT raw_excerpt FROM crm_interactions "
+                "SELECT ts, raw_excerpt FROM crm_interactions "
                 "WHERE lower(from_addr) = ANY(%s) AND raw_excerpt IS NOT NULL "
                 "AND btrim(raw_excerpt) <> '' "
                 "ORDER BY ts DESC LIMIT %s",
                 (OWNER_EMAILS, limit),
             )
-            return [r["raw_excerpt"].strip() for r in cur.fetchall() if (r["raw_excerpt"] or "").strip()]
+            return [dict(r) for r in cur.fetchall() if (r["raw_excerpt"] or "").strip()]
 
 
 def list_interactions_for_people(person_ids: list[int]) -> dict[int, list[dict]]:
