@@ -73,7 +73,7 @@ def generate_brief_pdf(title: str, subtitle: str | None, brief_text: str, date_s
     date_str = date_str or datetime.now().strftime("%B %Y")
     story = []
 
-    _build_header(story, styles, date_str)
+    _build_header(story, styles, date_str, show_logo=False)
 
     story.append(Paragraph("Cedar Ridge Capital", styles["title"]))
     story.append(Spacer(1, 2))
@@ -251,7 +251,7 @@ def generate_status_pdf(data: dict, narrative_text: str, date_str: str | None = 
     w = PAGE_W - 2 * MARGIN
     story = []
 
-    _build_header(story, styles, date_str)
+    _build_header(story, styles, date_str, show_logo=False)
     story.append(Paragraph("Cedar Ridge Capital", styles["title"]))
     story.append(Spacer(1, 2))
     story.append(Paragraph("Capital Raise &mdash; Status Report", styles["header_meta"]))
@@ -324,7 +324,7 @@ def generate_dashboard_pdf(data: dict, date_str: str | None = None) -> bytes:
     story = []
     days = data.get("days", 30)
 
-    _build_header(story, styles, date_str)
+    _build_header(story, styles, date_str, show_logo=False)
     story.append(Paragraph("Cedar Ridge Capital", styles["title"]))
     story.append(Spacer(1, 2))
     story.append(Paragraph(f"CRM Activity Report &mdash; trailing {days} days", styles["header_meta"]))

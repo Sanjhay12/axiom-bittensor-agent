@@ -1077,17 +1077,9 @@ async def process_once():
                         crm_store.create_name_flag(person_id, c["id"], flag_message_id)
                     special_reply_sent = True
 
-        if (extracted.get("importance") or 0) >= HIGH_IMPORTANCE_THRESHOLD:
-            name = extracted.get("person_name") or extracted.get("person_email") or "Unknown"
-            firm = extracted.get("firm_name") or ""
-            label = f"{name} ({firm})" if firm else name
-            body = (
-                f"<b>High-priority contact: {label}</b>\n"
-                f"{extracted.get('summary', '')}\n"
-                f"Next step: {extracted.get('next_step') or 'none noted'}"
-            )
-            await crm_mail.send_async(f"High-priority contact: {label}", body)
-            special_reply_sent = True
+        # (High-priority contacts no longer trigger a real-time alert email — owner asked us not
+        # to email back on account of priority. Priority still drives digest/to-do ORDERING, just
+        # not an inbound alert.)
 
         person = crm_store.find_person(extracted.get("person_email") or "")
         if person and person.get("pending_stage"):

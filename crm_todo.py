@@ -45,6 +45,12 @@ Key action items: the specific next action(s) for this investor
 
 Order investors by importance and deal value. Keep each block to a few tight lines. If an investor has several products/opportunities in play, note them within its block.
 
+Then a dedicated product section:
+
+<b>Pipeline by Product</b>
+Group the active opportunities BY PRODUCT (the fund/strategy being raised — e.g. Nebari, Acorn) — one block per product, PRODUCTS ORDERED BY PRIORITY (total deal value / importance, most important first). Under each product, list the investors in play for it, highest-priority first, each with stage and the specific next action.
+CRITICAL — collapse duplicates: treat product names that differ only by a parenthetical, casing, or a minor suffix as the SAME product and merge them into one block. E.g. "Nebari" and "Nebari (unknown)" are the SAME product — list it once as "Nebari"; never show them as two products.
+
 Then, once at the end:
 
 <b>Manager Action Items</b>

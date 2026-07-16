@@ -395,12 +395,14 @@ def _add_section(story, header: str, body: str, styles: dict):
             story.append(Paragraph(_esc(line), styles["body"]))
 
 
-def _build_header(story, styles, date_str):
-    """Logo top-left, date below logo, Private & Confidential top-right, then HR."""
+def _build_header(story, styles, date_str, show_logo: bool = True):
+    """Logo top-left, date below logo, Private & Confidential top-right, then HR.
+    show_logo=False suppresses the logo image (Cedar Ridge letterhead uses the
+    'Cedar Ridge Capital' wordmark title instead of the figure logo)."""
     col = (PAGE_W - 2 * MARGIN) / 2
 
     logo_cell = ""
-    if os.path.exists(LOGO_PATH):
+    if show_logo and os.path.exists(LOGO_PATH):
         logo_cell = Image(LOGO_PATH, width=2.2 * cm, height=2.2 * cm)
 
     conf_para = Paragraph("Private &amp; Confidential", styles["confidential"])

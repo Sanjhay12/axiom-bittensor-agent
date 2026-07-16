@@ -901,7 +901,16 @@ def find_person(query: str) -> dict | None:
                 WHERE LOWER(p.name) LIKE %s OR LOWER(f.name) LIKE %s
                 ORDER BY p.importance DESC NULLS LAST LIMIT 1
             """, (f"%{query}%", f"%{query}%"))
-            return cur.fetchone()
+            row = cur.fetchone()
+            if row:
+                return row
+    # Fallback: a query like "Thomas Lefler at Eagle Advisors" / "Jane from Acme" / "Bob @ X"
+    # bundles the name AND firm, so it matches no single name/firm field. Retry on just the name
+    # portion (before the connector), which resolves to the person.
+    parts = re.split(r"\s+at\s+|\s+from\s+|\s*@\s*", query, maxsplit=1)
+    if len(parts) == 2 and parts[0].strip() and parts[0].strip() != query:
+        return find_person(parts[0].strip())
+    return None
 
 
 def all_people_brief_context() -> list[dict]:
