@@ -112,18 +112,24 @@ async def _learned_voice() -> tuple[str | None, int]:
 
 
 async def resolve_voice() -> tuple[str, str]:
-    """(source, samples) for the voice a draft will currently write in. Precedence:
-      1. an explicit profile Joe pasted ("voice: ..."), if any — a manual override always wins;
-      2. otherwise learned from his own recent mail, with only HIS prose extracted from each
-         (so forwarded investor threads don't blend the two voices);
-      3. otherwise the built-in default, until there's any of his writing to learn from.
+    """(source, samples) for the voice a draft writes in. COMBINES everything we have of Joe's
+    own writing so the voice reflects both:
+      - samples he pasted explicitly (the 'voice_profile' config key), AND
+      - samples learned from his own recent mail (only HIS prose, extracted from each — so
+        forwarded investor threads don't blend the two voices).
+    Falls back to the built-in default only when there's nothing of his writing at all.
     The 'source' string is human-readable for the "voice" command."""
+    parts, labels = [], []
     explicit = crm_store.get_config("voice_profile")
     if explicit:
-        return "samples you pasted", explicit
+        parts.append(explicit)
+        labels.append("samples you pasted")
     learned, n = await _learned_voice()
     if learned:
-        return f"learned from {n} of your own emails", learned
+        parts.append(learned)
+        labels.append(f"{n} of your own sent emails")
+    if parts:
+        return " + ".join(labels), "\n\n---\n\n".join(parts)
     return "built-in default (no sent emails on file yet)", DEFAULT_VOICE
 
 

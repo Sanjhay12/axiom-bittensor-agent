@@ -704,8 +704,8 @@ async def _reply_to_note(msg: dict, note: str, _decomposed: bool = False):
         await _reply_text(msg, sender,
             f"<b>Drafting voice — {source}:</b>\n\n{text}\n\n"
             "<i>I learn this from your own emails automatically — including the messages you "
-            "wrote inside threads you forward. To override, email "
-            "\"voice: &lt;paste a few of your emails&gt;\".</i>")
+            "wrote inside threads you forward — and combine it with any samples you paste via "
+            "\"voice: &lt;paste an email&gt;\".</i>")
         return
     vm = _VOICE_SET_RE.match(note.strip())
     if vm:
