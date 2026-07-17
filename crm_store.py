@@ -1019,6 +1019,9 @@ def upsert_opportunity(person_id: int | None, product: str, stage: str | None = 
         raise ValueError("upsert_opportunity requires person_id or firm_id")
     now = int(time.time())
     obj_profile_json = json.dumps({k: v for k, v in objection_profile.items() if v}) if objection_profile else None
+    # Drop "(unknown)"-style noise so "Nebari" and "Nebari (unknown)" don't fragment into two
+    # products; collapse whitespace. Keeps the base name (doesn't strip meaningful parentheticals).
+    product = re.sub(r"\s+", " ", re.sub(r"\s*\(\s*unknown\s*\)\s*", " ", product, flags=re.I)).strip()
     product_lower = product.strip().lower()
     with store.get_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
