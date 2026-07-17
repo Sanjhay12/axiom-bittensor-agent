@@ -49,7 +49,7 @@ Then a dedicated product section:
 
 <b>Pipeline by Product</b>
 Group the active opportunities BY PRODUCT (the fund/strategy being raised — e.g. Nebari, Acorn) — one block per product, PRODUCTS ORDERED BY PRIORITY (total deal value / importance, most important first). Under each product, list the investors in play for it, highest-priority first, each with stage and the specific next action.
-CRITICAL — collapse duplicates: treat product names that differ only by a parenthetical, casing, or a minor suffix as the SAME product and merge them into one block. E.g. "Nebari" and "Nebari (unknown)" are the SAME product — list it once as "Nebari"; never show them as two products.
+CRITICAL — collapse NOISE duplicates only: product names that differ merely by a parenthetical, casing, or a "(unknown)"-type tag are the SAME product — e.g. "Nebari" and "Nebari (unknown)" are one product, list it once as "Nebari". BUT genuinely distinct funds are SEPARATE products and must stay separate — e.g. "Nebari Natural Resource Credit Fund I", "Fund II", and "Fund III" are three different raises; never merge those into one.
 
 Then, once at the end:
 
